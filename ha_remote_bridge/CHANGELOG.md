@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2
+
+- Increased the aiohttp request-header limits for Home Assistant Ingress traffic.
+- Fixes `431 Request Header Fields Too Large` errors seen with some proxied resources when the browser/Ingress request contains large cookies or headers.
+- Keeps the larger headers on the Ingress-facing side only; proxied LAN resources still receive filtered headers.
+
 ## 0.1.1
 
 - Added resource-scoped target cookie forwarding so login/session and CSRF flows can work through Ingress.

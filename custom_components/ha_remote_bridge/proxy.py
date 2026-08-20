@@ -57,9 +57,6 @@ class HARemoteBridgeProxyView(HomeAssistantView):
     async def head(self, request: web.Request, entry_id: str, path: str = "") -> web.Response:
         return await self._proxy(request, entry_id, path)
 
-    async def options(self, request: web.Request, entry_id: str, path: str = "") -> web.Response:
-        return await self._proxy(request, entry_id, path)
-
     async def _proxy(self, request: web.Request, entry_id: str, path: str) -> web.Response:
         """Forward an authenticated request to a configured target."""
         hass = request.app["hass"]

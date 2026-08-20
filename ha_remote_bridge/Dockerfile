@@ -1,5 +1,8 @@
 FROM ghcr.io/home-assistant/base:latest
 
+ARG BUILD_VERSION
+ARG BUILD_ARCH
+
 RUN apk add --no-cache python3 py3-aiohttp
 
 COPY run.sh /run.sh
@@ -8,6 +11,9 @@ RUN chmod a+x /run.sh
 
 WORKDIR /app
 
-LABEL io.hass.type="app"
+LABEL \
+  io.hass.version="${BUILD_VERSION}" \
+  io.hass.type="app" \
+  io.hass.arch="${BUILD_ARCH}"
 
 CMD ["/run.sh"]

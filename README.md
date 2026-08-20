@@ -1,12 +1,15 @@
 # HA Remote Bridge
 
-HA Remote Bridge is an experimental Home Assistant project for accessing selected local network resources through your existing Home Assistant connection.
+HA Remote Bridge provides secure remote access to selected local network resources through Home Assistant.
 
-> **Status:** Early proof of concept. Version `0.1.0` implements the HACS/custom-integration side of the project. It is not yet a full Home Assistant Ingress replacement.
+The project now contains two components:
+
+1. **HA Remote Bridge App (recommended for browser access)** — a Home Assistant App/add-on with Ingress, a resource manager UI, HTTP/HTTPS reverse proxying and WebSocket bridging.
+2. **HA Remote Bridge HACS integration** — an experimental custom integration for Home Assistant-native configuration, entities and future device discovery.
+
+> **Status:** Experimental `0.1.0` development release.
 
 ## Goal
-
-The long-term goal is to make local resources available remotely without exposing each device directly to the Internet.
 
 ```text
 Remote browser
@@ -15,7 +18,10 @@ Remote browser
 Home Assistant / Nabu Casa
       |
       v
-HA Remote Bridge
+Home Assistant Ingress
+      |
+      v
+HA Remote Bridge App
       |
       +--> ESPHome web UI
       +--> Router / switch / NAS
@@ -23,29 +29,68 @@ HA Remote Bridge
       +--> SSH terminal (planned)
 ```
 
-## Current MVP
+The local device does not need to be exposed directly to the Internet. Home Assistant authenticates the user and Ingress forwards the request internally to HA Remote Bridge.
 
-The first HACS draft provides:
+## Home Assistant App / add-on
 
-- Home Assistant UI configuration through a config flow.
-- One HTTP/HTTPS target per config entry.
-- An authenticated Home Assistant API proxy endpoint.
-- HTTP methods including GET, POST, PUT, PATCH and DELETE.
-- Redirect rewriting for redirects back to the configured target.
-- Best-effort rewriting of root-relative HTML links.
-- Optional SSL certificate verification for local HTTPS services.
-- An entity for each configured bridge with its proxy path in the `bridge_path` attribute.
-- Administrator-only proxy access in the current MVP.
+The App is the recommended way to use HA Remote Bridge for browser-based remote access.
 
-## Important limitation of the HACS-only MVP
+### Current App features
 
-Home Assistant API endpoints require authenticated API requests. A normal browser navigation to `/api/ha_remote_bridge/...` does not automatically attach the Home Assistant frontend access token.
+- Home Assistant Ingress.
+- Browser-friendly resource launcher.
+- Add/delete local HTTP and HTTPS targets from the App UI.
+- Persistent configuration in the App `/data` volume.
+- HTTP method forwarding.
+- Redirect rewriting.
+- Best-effort HTML and CSS path rewriting.
+- Browser shim for root-relative `fetch`, XMLHttpRequest and WebSocket URLs.
+- WebSocket bridging.
+- Optional TLS verification for self-signed local HTTPS resources.
+- No published LAN or Internet port.
+- App panel restricted to Home Assistant administrators in this release.
 
-That means this first version proves the proxy backend and configuration model, but **does not yet provide the final one-click browser experience** for arbitrary local web interfaces.
+### Install the App
 
-The intended next architectural step is a companion Home Assistant app/add-on using **Home Assistant Ingress**. The HACS integration can then provide discovery, configuration and entities while the app/add-on provides browser-friendly proxying, WebSockets and later SSH.
+In Home Assistant:
 
-## Installation with HACS
+1. Go to **Settings > Apps > App store**.
+2. Open the repositories menu.
+3. Add:
+
+   ```text
+   https://github.com/ricobach/HA-Remote-Bridge
+   ```
+
+4. Install **HA Remote Bridge**.
+5. Start the App.
+6. Select **Open Web UI**.
+
+The repository contains the required `repository.yaml`, so Home Assistant can use the same GitHub repository as an App repository.
+
+### Add a resource
+
+Examples:
+
+```text
+Kitchen ESPHome
+http://192.168.1.51
+```
+
+```text
+Proxmox
+https://192.168.1.10:8006
+```
+
+Disable **Verify SSL** only when the local HTTPS resource uses a certificate that cannot be verified by the App.
+
+Select **Open** beside a resource to access it through the current Home Assistant Ingress session.
+
+## HACS integration
+
+The HACS integration remains in the repository for Home Assistant-native configuration and future discovery/management features.
+
+### Install with HACS
 
 1. Open HACS.
 2. Add this repository as a custom repository.
@@ -55,50 +100,57 @@ The intended next architectural step is a companion Home Assistant app/add-on us
 6. Go to **Settings > Devices & services > Add integration**.
 7. Search for **HA Remote Bridge**.
 
-Repository:
+The current HACS integration exposes an authenticated `/api/ha_remote_bridge/...` proxy proof of concept and status entities. For interactive browser access, use the Ingress App instead.
+
+## Architecture
 
 ```text
-https://github.com/ricobach/HA-Remote-Bridge
+Home Assistant frontend
+        |
+        | authenticated Ingress
+        v
++-------------------------------+
+| HA Remote Bridge App          |
+|                               |
+| Resource manager              |
+| HTTP/HTTPS reverse proxy      |
+| Path/redirect rewriting       |
+| WebSocket bridge              |
++---------------+---------------+
+                |
+                | local network
+        +-------+--------+---------+
+        |                |         |
+        v                v         v
+     ESPHome          Proxmox    Router
 ```
 
-## Add a resource
+The App listens internally on port `8099`, the Home Assistant Ingress default. No host port is published.
 
-Example:
+## Security model
 
-```text
-Name: Kitchen ESPHome
-Local URL: http://192.168.1.51
-Verify SSL certificate: Yes
-```
+- External authentication is handled by Home Assistant Ingress.
+- The App panel is administrator-only in `0.1.0`.
+- The App rejects direct requests that are not delivered by the Home Assistant Ingress proxy (localhost is retained only for container-local diagnostics).
+- HA Remote Bridge does not publish a TCP port to the LAN or Internet.
+- Incoming Home Assistant `Authorization` and `Cookie` headers are not forwarded to local resources.
+- Credentials embedded directly in target URLs are rejected.
 
-For a self-signed local HTTPS service you can disable certificate verification.
+HA Remote Bridge is still experimental. Do not use this first release as the sole security boundary for highly sensitive administrative systems.
 
-After setup, HA Remote Bridge creates a status entity. Its `bridge_path` attribute contains a path similar to:
+## Compatibility notes
 
-```text
-/api/ha_remote_bridge/01ABCDEF1234567890/
-```
+Simple local web interfaces should work directly. HA Remote Bridge rewrites common root-relative paths and includes a browser-side compatibility shim for common API and WebSocket calls.
 
-## Testing the MVP
+Some applications may still fail when they:
 
-Use a Home Assistant long-lived access token to test the proxy endpoint:
+- hard-code absolute external origins in unusual ways;
+- require complex cookie authentication;
+- use browser APIs not yet rewritten by HA Remote Bridge;
+- intentionally prevent reverse proxying or framing;
+- make assumptions that the application is hosted at `/`.
 
-```bash
-curl \
-  -H "Authorization: Bearer YOUR_HOME_ASSISTANT_TOKEN" \
-  "https://YOUR_HOME_ASSISTANT_URL/api/ha_remote_bridge/CONFIG_ENTRY_ID/"
-```
-
-Requests are forwarded from Home Assistant to the configured local URL.
-
-## Current security model
-
-- The target must first be configured as a Home Assistant config entry.
-- The proxy endpoint requires Home Assistant authentication.
-- The proxy additionally requires the authenticated Home Assistant user to be an administrator.
-- The remote target is never intentionally exposed as a separate Internet-facing listener by this integration.
-
-This project is experimental. Do not use it as the only security boundary for sensitive administrative interfaces yet.
+These compatibility cases will be improved incrementally.
 
 ## Roadmap
 
@@ -107,26 +159,32 @@ This project is experimental. Do not use it as the only security boundary for se
 - [x] HACS repository structure
 - [x] Config flow
 - [x] HTTP/HTTPS target configuration
-- [x] Authenticated proxy endpoint
-- [x] Redirect rewriting
-- [x] Basic root-relative HTML rewriting
+- [x] Authenticated API proxy proof of concept
 - [x] Status entity
 - [ ] Options/reconfigure flow
 - [ ] Health checking
 - [ ] ESPHome discovery
+- [ ] App/integration configuration synchronization
 
-### Phase 2 — Home Assistant app/add-on
+### Phase 2 — Home Assistant App / add-on
 
-- [ ] Home Assistant Ingress
-- [ ] Browser-friendly resource launcher
-- [ ] WebSocket proxying
-- [ ] Improved cookie/header/path rewriting
+- [x] App repository structure
+- [x] Home Assistant Ingress
+- [x] Browser resource launcher
+- [x] Persistent resource manager
+- [x] HTTP/HTTPS reverse proxy
+- [x] Redirect/path rewriting
+- [x] WebSocket proxying
+- [ ] Edit existing resources
+- [ ] Resource health status
+- [ ] Improved cookie isolation/authentication support
 - [ ] Per-resource access controls
 
 ### Phase 3 — Remote terminal
 
-- [ ] Browser SSH using ttyd or equivalent
+- [ ] Browser SSH terminal
 - [ ] SSH key management
+- [ ] Password/key authentication options
 - [ ] Session timeout and cleanup
 - [ ] Device-aware SSH targets
 
@@ -136,18 +194,37 @@ This project is experimental. Do not use it as the only security boundary for se
 - [ ] RDP
 - [ ] Additional TCP-based local services
 
+## Repository layout
+
+```text
+HA-Remote-Bridge/
+├── repository.yaml
+├── ha_remote_bridge/
+│   ├── config.yaml
+│   ├── Dockerfile
+│   ├── run.sh
+│   ├── README.md
+│   ├── DOCS.md
+│   ├── CHANGELOG.md
+│   └── app/
+│       └── main.py
+├── hacs.json
+└── custom_components/
+    └── ha_remote_bridge/
+```
+
 ## Development
 
-Integration domain:
+Home Assistant App slug:
 
 ```text
 ha_remote_bridge
 ```
 
-Source directory:
+HACS integration domain:
 
 ```text
-custom_components/ha_remote_bridge/
+ha_remote_bridge
 ```
 
 The project is currently developed directly on `main`.

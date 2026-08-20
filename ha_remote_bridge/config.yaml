@@ -9,7 +9,9 @@ arch:
 startup: application
 boot: auto
 init: false
+stage: experimental
 ingress: true
 ingress_port: 8099
-panel_icon: mdi:bridge
+panel_icon: mdi:lan-connect
 panel_title: Remote Bridge
+panel_admin: true

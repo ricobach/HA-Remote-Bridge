@@ -11,6 +11,7 @@ import json
 import logging
 import re
 import secrets
+from http.cookies import SimpleCookie
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
@@ -23,6 +24,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 PORT = 8099
 DATA_FILE = Path("/data/resources.json")
 INGRESS_REMOTE = "172.30.32.2"
+COOKIE_PREFIX = "hrb_"
 
 HOP_BY_HOP = {
     "connection",
@@ -124,8 +126,6 @@ def validate_resource_payload(payload: dict) -> tuple[str, str, bool]:
 @web.middleware
 async def ingress_only(request: web.Request, handler):
     """Only accept requests delivered through Home Assistant Ingress."""
-    # Localhost is retained for container-level diagnostics. No host port is
-    # published, so it is not reachable from the LAN or Internet.
     if request.remote not in {INGRESS_REMOTE, "127.0.0.1", "::1"}:
         LOGGER.warning("Rejected non-Ingress request from %s", request.remote)
         raise web.HTTPForbidden(text="HA Remote Bridge is available through Home Assistant Ingress only")
@@ -182,7 +182,38 @@ def upstream_url(resource: dict, tail: str, query: str) -> str:
     return target
 
 
-def filtered_request_headers(request: web.Request, target: str) -> dict[str, str]:
+def resource_cookie_prefix(resource_id: str) -> str:
+    """Return the browser-side prefix used to isolate a target's cookies."""
+    return f"{COOKIE_PREFIX}{resource_id}_"
+
+
+def upstream_cookie_header(request: web.Request, resource_id: str) -> str | None:
+    """Extract only this resource's cookies and restore original cookie names."""
+    raw = request.headers.get("Cookie", "")
+    if not raw:
+        return None
+
+    parsed = SimpleCookie()
+    try:
+        parsed.load(raw)
+    except Exception:  # malformed browser cookies should not break the proxy
+        return None
+
+    prefix = resource_cookie_prefix(resource_id)
+    values = []
+    for name, morsel in parsed.items():
+        if name.startswith(prefix):
+            original = name[len(prefix):]
+            if original:
+                values.append(f"{original}={morsel.value}")
+    return "; ".join(values) or None
+
+
+def filtered_request_headers(
+    request: web.Request,
+    target: str,
+    resource_id: str,
+) -> dict[str, str]:
     """Prepare safe request headers for the upstream resource."""
     headers = {
         key: value
@@ -196,6 +227,55 @@ def filtered_request_headers(request: web.Request, target: str) -> dict[str, str
     headers["Referer"] = target
     headers["X-Forwarded-Host"] = request.host
     headers["X-Forwarded-Proto"] = request.scheme
+
+    cookie = upstream_cookie_header(request, resource_id)
+    if cookie:
+        headers["Cookie"] = cookie
+
+    return headers
+
+
+def add_rewritten_cookies(
+    headers: CIMultiDict,
+    upstream,
+    request: web.Request,
+    resource_id: str,
+) -> None:
+    """Rewrite upstream cookies so they are isolated to one bridged resource."""
+    bridge_path = f"{ingress_prefix(request)}proxy/{resource_id}/"
+    prefix = resource_cookie_prefix(resource_id)
+
+    for raw_cookie in upstream.headers.getall("Set-Cookie", []):
+        parsed = SimpleCookie()
+        try:
+            parsed.load(raw_cookie)
+        except Exception:
+            LOGGER.debug("Unable to parse upstream Set-Cookie: %s", raw_cookie)
+            continue
+
+        for original_name, morsel in parsed.items():
+            rewritten = SimpleCookie()
+            browser_name = prefix + original_name
+            rewritten[browser_name] = morsel.value
+            output = rewritten[browser_name]
+            output["path"] = bridge_path
+            output["httponly"] = bool(morsel["httponly"])
+            output["secure"] = bool(morsel["secure"])
+            if morsel["samesite"]:
+                output["samesite"] = morsel["samesite"]
+            if morsel["expires"]:
+                output["expires"] = morsel["expires"]
+            if morsel["max-age"]:
+                output["max-age"] = morsel["max-age"]
+            headers.add("Set-Cookie", output.OutputString())
+
+
+def copy_response_headers(upstream) -> CIMultiDict:
+    """Copy safe upstream headers while preserving duplicates."""
+    headers = CIMultiDict()
+    for key, value in upstream.headers.items():
+        if key.lower() not in RESPONSE_HEADERS_TO_DROP:
+            headers.add(key, value)
     return headers
 
 
@@ -287,7 +367,6 @@ def rewrite_text_body(
     lowered = content_type.lower()
 
     if "text/html" in lowered:
-        # Rewrite common root-relative attributes.
         text = re.sub(
             r"(?i)(href|src|action|poster)=(\"|')/(?!/)",
             lambda m: f"{m.group(1)}={m.group(2)}{bridge}/",
@@ -333,7 +412,7 @@ async def proxy_websocket(
     try:
         async with CLIENT.ws_connect(
             ws_target,
-            headers=filtered_request_headers(request, target),
+            headers=filtered_request_headers(request, target, resource_id),
             protocols=protocols,
             ssl=None if resource.get("verify_ssl", True) else False,
             timeout=20,
@@ -369,12 +448,42 @@ async def proxy_websocket(
                 if task.exception():
                     raise task.exception()
     except (ClientError, asyncio.TimeoutError) as err:
-        LOGGER.warning("WebSocket bridge failed for %s: %s", resource["name"], err)
+        LOGGER.warning("WebSocket bridge failed for %s: %r", resource["name"], err)
     finally:
         if not browser_ws.closed:
             await browser_ws.close()
 
     return browser_ws
+
+
+async def stream_upstream_response(
+    request: web.Request,
+    upstream,
+    resource_id: str,
+) -> web.StreamResponse:
+    """Stream long-lived responses such as Server-Sent Events."""
+    headers = copy_response_headers(upstream)
+    add_rewritten_cookies(headers, upstream, request, resource_id)
+    response = web.StreamResponse(
+        status=upstream.status,
+        reason=upstream.reason,
+        headers=headers,
+    )
+    await response.prepare(request)
+
+    try:
+        async for chunk in upstream.content.iter_any():
+            if chunk:
+                await response.write(chunk)
+    except (ConnectionResetError, asyncio.CancelledError):
+        pass
+    finally:
+        try:
+            await response.write_eof()
+        except (ConnectionResetError, RuntimeError):
+            pass
+
+    return response
 
 
 async def proxy(request: web.Request) -> web.StreamResponse:
@@ -393,19 +502,24 @@ async def proxy(request: web.Request) -> web.StreamResponse:
     body = await request.read() if request.can_read_body else None
 
     try:
-        async with CLIENT.request(
+        upstream = await CLIENT.request(
             request.method,
             target,
-            headers=filtered_request_headers(request, target),
+            headers=filtered_request_headers(request, target, resource_id),
             data=body,
             allow_redirects=False,
             ssl=None if resource.get("verify_ssl", True) else False,
-        ) as upstream:
+            timeout=ClientTimeout(total=None, connect=15, sock_connect=15, sock_read=None),
+        )
+
+        try:
+            content_type = upstream.headers.get("Content-Type", "")
+            if "text/event-stream" in content_type.lower():
+                return await stream_upstream_response(request, upstream, resource_id)
+
             raw_body = await upstream.read()
-            headers = CIMultiDict()
-            for key, value in upstream.headers.items():
-                if key.lower() not in RESPONSE_HEADERS_TO_DROP:
-                    headers.add(key, value)
+            headers = copy_response_headers(upstream)
+            add_rewritten_cookies(headers, upstream, request, resource_id)
 
             prefix = ingress_prefix(request)
             if upstream.headers.get("Location"):
@@ -417,7 +531,6 @@ async def proxy(request: web.Request) -> web.StreamResponse:
                     prefix,
                 )
 
-            content_type = upstream.headers.get("Content-Type", "")
             if raw_body and (
                 "text/html" in content_type.lower()
                 or "text/css" in content_type.lower()
@@ -436,8 +549,10 @@ async def proxy(request: web.Request) -> web.StreamResponse:
                 headers=headers,
                 body=b"" if request.method == "HEAD" else raw_body,
             )
+        finally:
+            upstream.release()
     except (ClientError, asyncio.TimeoutError) as err:
-        LOGGER.warning("Proxy request failed for %s: %s", resource["name"], err)
+        LOGGER.warning("Proxy request failed for %s: %r", resource["name"], err)
         raise web.HTTPBadGateway(text=f"Unable to reach {resource['name']}: {err}") from err
 
 
@@ -450,7 +565,7 @@ async def on_startup(app: web.Application) -> None:
     """Initialize persistent state and HTTP client."""
     global CLIENT
     await STORE.load()
-    CLIENT = ClientSession(timeout=ClientTimeout(total=60, connect=15))
+    CLIENT = ClientSession(timeout=ClientTimeout(total=None, connect=15, sock_read=None))
     LOGGER.info("Loaded %d configured resource(s)", len(STORE.resources))
 
 
@@ -480,7 +595,6 @@ INDEX_HTML = """<!doctype html>
     .resource-url { opacity: .7; font-size: 13px; overflow-wrap: anywhere; margin-top: 3px; }
     .actions { display: flex; gap: 8px; flex-wrap: wrap; }
     button, .button { border: 0; border-radius: 8px; padding: 10px 14px; cursor: pointer; text-decoration: none; font: inherit; background: var(--primary-color, #03a9f4); color: white; }
-    button.secondary { background: #777; }
     button.danger { background: #c62828; }
     form { display: grid; grid-template-columns: 1fr 2fr auto auto; gap: 10px; align-items: end; }
     label { font-size: 12px; opacity: .8; display: grid; gap: 5px; }
@@ -506,7 +620,7 @@ INDEX_HTML = """<!doctype html>
       <label><span>Verify SSL</span><input id="verify" type="checkbox" checked></label>
       <button type="submit">Add resource</button>
     </form>
-    <p class="note">Only HTTP and HTTPS are supported in this release. Credentials embedded in URLs are rejected.</p>
+    <p class="note">HTTP/HTTPS, target login cookies, WebSockets and Server-Sent Events are supported. Credentials embedded in URLs are rejected.</p>
   </section>
 
   <section id="resources"></section>

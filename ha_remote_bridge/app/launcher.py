@@ -24,6 +24,8 @@ _UPSTREAM_HEADER_ALLOWLIST = {
     "pragma",
     "range",
     "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
 }
 
 

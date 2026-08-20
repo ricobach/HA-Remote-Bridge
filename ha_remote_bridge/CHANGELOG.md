@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.5
+
+- Extended the injected browser compatibility shim to rewrite `fetch()` calls that use `Request` objects or `URL` objects, not only plain string URLs.
+- Added `EventSource` URL rewriting for proxied applications using Server-Sent Events.
+- Helps modern SPA applications whose HTML/JS shell loads through the bridge but whose data requests otherwise bypass the proxied resource path.
+
 ## 0.1.4
 
 - Forward `X-CSRFToken` and `X-Requested-With` to bridged targets when the browser sends them.

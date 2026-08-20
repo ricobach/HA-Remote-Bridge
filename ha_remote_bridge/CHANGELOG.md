@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.4
+
+- Forward `X-CSRFToken` and `X-Requested-With` to bridged targets when the browser sends them.
+- Fixes OPNsense AJAX POST/PUT/DELETE calls that returned `403` after the strict ESPHome-safe header allowlist was introduced.
+- Keeps Home Assistant/Ingress-specific headers blocked so embedded targets such as ESPHome are not exposed to oversized proxy headers.
+
 ## 0.1.3
 
 - Switched LAN target request forwarding to a small explicit header allowlist.

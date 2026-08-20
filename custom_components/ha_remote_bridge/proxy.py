@@ -7,9 +7,9 @@ from urllib.parse import urljoin, urlparse
 
 from aiohttp import ClientError, web
 
+from homeassistant.components.http import HomeAssistantView
 from homeassistant.const import CONF_URL
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.components.http import HomeAssistantView
 
 from .const import API_BASE, CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL, DOMAIN
 
@@ -152,7 +152,7 @@ class HARemoteBridgeProxyView(HomeAssistantView):
         charset = "utf-8"
         match = re.search(r"charset=([^;\s]+)", content_type, flags=re.IGNORECASE)
         if match:
-            charset = match.group(1).strip('"\'')
+            charset = match.group(1).strip("\"'")
 
         try:
             text = body.decode(charset, errors="replace")
@@ -161,5 +161,9 @@ class HARemoteBridgeProxyView(HomeAssistantView):
             text = body.decode(charset, errors="replace")
 
         prefix = f"{API_BASE}/{entry_id}"
-        text = re.sub(r'(?i)(href|src|action)=(\"|\')/(?!/)', rf'\1=\2{prefix}/', text)
+        text = re.sub(
+            r"(?i)(href|src|action)=(\"|')/(?!/)",
+            rf"\1=\2{prefix}/",
+            text,
+        )
         return text.encode(charset, errors="replace")

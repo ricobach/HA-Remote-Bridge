@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.3
+
+- Switched LAN target request forwarding to a small explicit header allowlist.
+- Prevents Home Assistant/Ingress-specific and oversized browser headers from being sent to embedded web servers such as ESPHome.
+- Preserves target-specific cookies plus rewritten `Origin`/`Referer` so login and CSRF flows such as OPNsense continue to work.
+- Keeps the larger Ingress-facing header limits introduced in 0.1.2.
+
 ## 0.1.2
 
 - Increased the aiohttp request-header limits for Home Assistant Ingress traffic.

@@ -7,6 +7,7 @@ small set of headers forwarded to LAN resources.
 from __future__ import annotations
 
 import asyncio
+import json
 from urllib.parse import urlparse
 
 from aiohttp import web
@@ -53,7 +54,67 @@ def filtered_request_headers(
     return headers
 
 
+_original_bridge_runtime_script = main.bridge_runtime_script
+
+
+def enhanced_bridge_runtime_script(prefix: str, resource_id: str, target_url: str) -> str:
+    """Extend the browser shim for Request/URL objects and EventSource."""
+    original = _original_bridge_runtime_script(prefix, resource_id, target_url)
+    bridge = f"{prefix}proxy/{resource_id}"
+    target = urlparse(target_url)
+    target_origin = f"{target.scheme}://{target.netloc}"
+
+    extension = f"""<script data-ha-remote-bridge-extended>
+(() => {{
+  const bridge = {json.dumps(bridge)};
+  const targetOrigin = {json.dumps(target_origin)};
+
+  const rewrite = (value) => {{
+    if (value instanceof URL) value = value.href;
+    if (typeof value !== 'string') return value;
+    try {{
+      const u = new URL(value, window.location.href);
+      const target = new URL(targetOrigin);
+      const sameTarget = u.host === target.host;
+      const rootRelative = value.startsWith('/');
+      if (sameTarget || rootRelative) {{
+        return window.location.protocol + '//' + window.location.host + bridge + u.pathname + u.search + u.hash;
+      }}
+    }} catch (_) {{}}
+    return value;
+  }};
+
+  // The base shim handles plain string fetch URLs. Extend it for modern
+  // frameworks that pass Request or URL objects instead.
+  const previousFetch = window.fetch;
+  window.fetch = function(input, init) {{
+    if (input instanceof Request) {{
+      const rewritten = rewrite(input.url);
+      if (rewritten !== input.url) {{
+        input = new Request(rewritten, input);
+      }}
+    }} else if (input instanceof URL) {{
+      input = rewrite(input);
+    }}
+    return previousFetch.call(this, input, init);
+  }};
+
+  // EventSource is common for live embedded-device UIs and some SPAs.
+  if (window.EventSource) {{
+    const NativeEventSource = window.EventSource;
+    window.EventSource = function(url, options) {{
+      return new NativeEventSource(rewrite(url), options);
+    }};
+    window.EventSource.prototype = NativeEventSource.prototype;
+  }}
+}})();
+</script>"""
+
+    return original + extension
+
+
 main.filtered_request_headers = filtered_request_headers
+main.bridge_runtime_script = enhanced_bridge_runtime_script
 
 from server import _run  # noqa: E402
 

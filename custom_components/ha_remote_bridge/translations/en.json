@@ -6,12 +6,12 @@
         "title": "Add local web resource",
         "description": "Configure a local HTTP or HTTPS resource to access through Home Assistant.",
         "data": {
-          "name": "Name",
+          "resource_name": "Name",
           "url": "Local URL",
           "verify_ssl": "Verify SSL certificate"
         },
         "data_description": {
-          "name": "A friendly name for this resource.",
+          "resource_name": "A friendly name for this resource.",
           "url": "The local HTTP or HTTPS URL, for example http://192.168.1.50.",
           "verify_ssl": "Disable only for local HTTPS services using a self-signed certificate."
         }

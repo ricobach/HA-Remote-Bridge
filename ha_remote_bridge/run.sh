@@ -2,4 +2,4 @@
 set -e
 
 bashio::log.info "Starting HA Remote Bridge"
-exec python3 /app/main.py
+exec python3 /app/server.py

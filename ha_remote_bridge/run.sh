@@ -1,0 +1,5 @@
+#!/usr/bin/with-contenv bashio
+set -e
+
+bashio::log.info "Starting HA Remote Bridge"
+exec python3 /app/main.py

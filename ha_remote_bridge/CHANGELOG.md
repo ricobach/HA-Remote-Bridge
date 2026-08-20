@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.1
+
+- Added resource-scoped target cookie forwarding so login/session and CSRF flows can work through Ingress.
+- Rewrites target `Set-Cookie` headers so cookies stay isolated to the selected bridged resource.
+- Added proper streaming for `text/event-stream` responses such as Server-Sent Events.
+- Removed the 60-second total upstream timeout for long-lived HTTP responses.
+- Improved proxy timeout error logging.
+
 ## 0.1.0
 
 - Initial Home Assistant App implementation.

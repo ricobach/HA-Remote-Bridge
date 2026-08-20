@@ -1,0 +1,11 @@
+{
+  "domain": "ha_remote_bridge",
+  "name": "HA Remote Bridge",
+  "codeowners": ["@ricobach"],
+  "config_flow": true,
+  "documentation": "https://github.com/ricobach/HA-Remote-Bridge",
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/ricobach/HA-Remote-Bridge/issues",
+  "version": "0.1.0"
+}

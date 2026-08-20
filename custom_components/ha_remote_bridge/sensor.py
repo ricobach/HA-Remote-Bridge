@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.entity import DeviceInfo, Entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import API_BASE
+from .const import API_BASE, DOMAIN
 
 
 async def async_setup_entry(
@@ -23,12 +23,18 @@ class HARemoteBridgeStatus(Entity):
     """Represent one configured remote bridge target."""
 
     _attr_has_entity_name = True
-    _attr_name = None
+    _attr_name = "Status"
 
     def __init__(self, entry: ConfigEntry) -> None:
         """Initialize the entity."""
         self._entry = entry
         self._attr_unique_id = entry.entry_id
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            name=entry.title,
+            manufacturer="HA Remote Bridge",
+            model="Remote web resource",
+        )
 
     @property
     def state(self) -> str:

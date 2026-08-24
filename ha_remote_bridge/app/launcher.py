@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 from aiohttp import web
 
 import main
+from ui_shell import INDEX_HTML as TABBED_INDEX_HTML
 
 _UPSTREAM_HEADER_ALLOWLIST = {
     "accept",
@@ -219,6 +220,7 @@ async def stream_upstream_response(
 main.filtered_request_headers = filtered_request_headers
 main.bridge_runtime_script = enhanced_bridge_runtime_script
 main.stream_upstream_response = stream_upstream_response
+main.INDEX_HTML = TABBED_INDEX_HTML
 
 from server import _run  # noqa: E402
 

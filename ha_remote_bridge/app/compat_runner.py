@@ -9,6 +9,7 @@ reused unchanged.
 from __future__ import annotations
 
 import asyncio
+from pathlib import PurePosixPath
 
 from aiohttp import ClientError, ClientTimeout, web
 
@@ -19,17 +20,24 @@ import main
 _original_rewrite_text_body = main.rewrite_text_body
 
 
+def _is_opnsense_widget_manager(tail: str) -> bool:
+    """Return True for OPNsense's dynamic dashboard widget loader."""
+    return PurePosixPath("/" + tail.lstrip("/")).name == "opnsense_widget_manager.js"
+
+
 def rewrite_text_body(
     body: bytes,
     content_type: str,
     resource: dict,
     resource_id: str,
     prefix: str,
+    *,
+    force_opnsense_widgets: bool = False,
 ) -> bytes:
     """Rewrite normal text bodies plus OPNsense dynamic widget module roots."""
     lowered = content_type.lower()
 
-    if "javascript" not in lowered and "ecmascript" not in lowered:
+    if not force_opnsense_widgets and "javascript" not in lowered and "ecmascript" not in lowered:
         return _original_rewrite_text_body(
             body,
             content_type,
@@ -38,18 +46,23 @@ def rewrite_text_body(
             prefix,
         )
 
-    charset = "utf-8"
-    try:
-        text = body.decode(charset, errors="replace")
-    except LookupError:
-        text = body.decode("utf-8", errors="replace")
-
+    text = body.decode("utf-8", errors="replace")
     bridge = f"{prefix}proxy/{resource_id}"
 
     # OPNsense's widget manager uses native dynamic import() with module URLs
     # rooted at /ui/js/widgets/. Native import() cannot be monkey-patched in
-    # the browser, so rewrite only this known module root before delivery.
-    text = text.replace("/ui/js/widgets/", f"{bridge}/ui/js/widgets/")
+    # the browser, so rewrite this known module root before delivery.
+    old = "/ui/js/widgets/"
+    new = f"{bridge}/ui/js/widgets/"
+    replacements = text.count(old)
+    text = text.replace(old, new)
+
+    if force_opnsense_widgets:
+        main.LOGGER.info(
+            "OPNsense widget manager rewrite for resource %s: %d occurrence(s)",
+            resource_id,
+            replacements,
+        )
 
     return text.encode("utf-8", errors="replace")
 
@@ -70,12 +83,21 @@ async def proxy(request: web.Request) -> web.StreamResponse:
 
     target = main.upstream_url(resource, tail, request.query_string)
     body = await request.read() if request.can_read_body else None
+    is_widget_manager = _is_opnsense_widget_manager(tail)
+    request_headers = main.filtered_request_headers(request, target, resource_id)
+
+    # The OPNsense asset URL is versioned but can remain unchanged across
+    # HA Remote Bridge releases. Do not allow a 304 to make the browser reuse
+    # an older, unrewritten copy of the widget manager.
+    if is_widget_manager:
+        for header in ("If-None-Match", "If-Modified-Since"):
+            request_headers.pop(header, None)
 
     try:
         upstream = await main.CLIENT.request(
             request.method,
             target,
-            headers=main.filtered_request_headers(request, target, resource_id),
+            headers=request_headers,
             data=body,
             allow_redirects=False,
             ssl=None if resource.get("verify_ssl", True) else False,
@@ -103,7 +125,8 @@ async def proxy(request: web.Request) -> web.StreamResponse:
 
             lowered = content_type.lower()
             if raw_body and (
-                "text/html" in lowered
+                is_widget_manager
+                or "text/html" in lowered
                 or "text/css" in lowered
                 or "javascript" in lowered
                 or "ecmascript" in lowered
@@ -114,7 +137,16 @@ async def proxy(request: web.Request) -> web.StreamResponse:
                     resource,
                     resource_id,
                     prefix,
+                    force_opnsense_widgets=is_widget_manager,
                 )
+
+            if is_widget_manager:
+                # Ensure the rewritten script is used immediately after an App
+                # update instead of a stale browser copy.
+                headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+                headers["Pragma"] = "no-cache"
+                headers.popall("ETag", None)
+                headers.popall("Last-Modified", None)
 
             return web.Response(
                 status=upstream.status,

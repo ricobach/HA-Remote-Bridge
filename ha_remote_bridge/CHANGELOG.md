@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.8
+
+- Added a browser-style top tab bar to the HA Remote Bridge manager.
+- Keeps a permanent Home tab for resource management.
+- Opens each active proxied resource in its own session tab.
+- Added an `X` close button to every resource session tab.
+- Added Back, Forward, and Reload controls for the active resource session.
+- Resource sessions use separate iframes so navigation history and live connections remain independent between tabs.
+- Kept the proxy, ESPHome SSE, cookie, and request-rewrite behavior unchanged from 0.1.7.
+
 ## 0.1.7
 
 - Fixed duplicate Home Assistant Ingress path rewriting in the injected browser shim.

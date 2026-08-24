@@ -93,6 +93,10 @@ def enhanced_bridge_runtime_script(prefix: str, resource_id: str, target_url: st
     try {{
       const u = new URL(value, window.location.href);
       const target = new URL(targetOrigin);
+      const alreadyBridged = u.origin === window.location.origin &&
+        (u.pathname === bridge || u.pathname.startsWith(bridge + '/'));
+      if (alreadyBridged) return u.href;
+
       const sameTarget = u.host === target.host;
       const rootRelative = value.startsWith('/');
       if (sameTarget || rootRelative) {{
@@ -102,8 +106,21 @@ def enhanced_bridge_runtime_script(prefix: str, resource_id: str, target_url: st
     return value;
   }};
 
+  const isBridgeUrl = (value) => {{
+    try {{
+      const raw = value instanceof Request ? value.url : (value instanceof URL ? value.href : value);
+      if (typeof raw !== 'string') return false;
+      const u = new URL(raw, window.location.href);
+      return u.origin === window.location.origin &&
+        (u.pathname === bridge || u.pathname.startsWith(bridge + '/'));
+    }} catch (_) {{
+      return false;
+    }}
+  }};
+
   // The base shim handles plain string fetch URLs. Extend it for modern
-  // frameworks that pass Request or URL objects instead.
+  // frameworks that pass Request or URL objects, and avoid sending an
+  // already-bridged string through the base shim a second time.
   const previousFetch = window.fetch;
   window.fetch = function(input, init) {{
     if (input instanceof Request) {{
@@ -112,7 +129,15 @@ def enhanced_bridge_runtime_script(prefix: str, resource_id: str, target_url: st
         input = new Request(rewritten, input);
       }}
     }} else if (input instanceof URL) {{
-      input = rewrite(input);
+      const rewritten = rewrite(input);
+      input = new Request(rewritten, init);
+      init = undefined;
+    }} else if (typeof input === 'string') {{
+      const rewritten = rewrite(input);
+      if (rewritten !== input || isBridgeUrl(input)) {{
+        input = new Request(rewritten, init);
+        init = undefined;
+      }}
     }}
     return previousFetch.call(this, input, init);
   }};

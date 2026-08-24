@@ -1,7 +1,8 @@
 """Runtime launcher for HA Remote Bridge.
 
 Keeps Home Assistant Ingress header handling separate from the deliberately
-small set of headers forwarded to LAN resources.
+small set of headers forwarded to LAN resources, while applying compatibility
+rules for browser APIs such as EventSource.
 """
 
 from __future__ import annotations
@@ -22,12 +23,18 @@ _UPSTREAM_HEADER_ALLOWLIST = {
     "content-type",
     "if-modified-since",
     "if-none-match",
+    "last-event-id",
     "pragma",
     "range",
     "user-agent",
     "x-csrftoken",
     "x-requested-with",
 }
+
+
+def _is_event_stream_target(target: str) -> bool:
+    """Return True for the conventional SSE events endpoint used by ESPHome."""
+    return urlparse(target).path.rstrip("/").endswith("/events")
 
 
 def filtered_request_headers(
@@ -44,8 +51,19 @@ def filtered_request_headers(
 
     parsed = urlparse(target)
     origin = f"{parsed.scheme}://{parsed.netloc}"
-    headers["Origin"] = origin
-    headers["Referer"] = target
+
+    if _is_event_stream_target(target):
+        # ESPHome uses /events as a long-lived Server-Sent Events connection.
+        # Keep this request tiny and deterministic for constrained embedded
+        # web servers, and preserve Last-Event-ID for native EventSource
+        # reconnect semantics.
+        headers["Accept"] = "text/event-stream"
+        headers["Cache-Control"] = "no-cache"
+        headers["Accept-Encoding"] = "identity"
+    else:
+        # Login/CSRF flows such as OPNsense can validate Origin/Referer.
+        headers["Origin"] = origin
+        headers["Referer"] = target
 
     cookie = main.upstream_cookie_header(request, resource_id)
     if cookie:
@@ -99,13 +117,18 @@ def enhanced_bridge_runtime_script(prefix: str, resource_id: str, target_url: st
     return previousFetch.call(this, input, init);
   }};
 
-  // EventSource is common for live embedded-device UIs and some SPAs.
+  // ESPHome Web Server uses EventSource('/events') for initial entity state,
+  // live state updates, logs and heartbeat pings. Subclassing preserves the
+  // native EventSource prototype/static behavior better than a wrapper
+  // function while still rewriting the URL through Ingress.
   if (window.EventSource) {{
     const NativeEventSource = window.EventSource;
-    window.EventSource = function(url, options) {{
-      return new NativeEventSource(rewrite(url), options);
-    }};
-    window.EventSource.prototype = NativeEventSource.prototype;
+    class BridgeEventSource extends NativeEventSource {{
+      constructor(url, options) {{
+        super(rewrite(url), options);
+      }}
+    }}
+    window.EventSource = BridgeEventSource;
   }}
 }})();
 </script>"""
@@ -113,8 +136,64 @@ def enhanced_bridge_runtime_script(prefix: str, resource_id: str, target_url: st
     return original + extension
 
 
+async def stream_upstream_response(
+    request: web.Request,
+    upstream,
+    resource_id: str,
+) -> web.StreamResponse:
+    """Stream SSE/long-lived responses without buffering."""
+    headers = main.copy_response_headers(upstream)
+    main.add_rewritten_cookies(headers, upstream, request, resource_id)
+
+    content_type = upstream.headers.get("Content-Type", "")
+    is_sse = "text/event-stream" in content_type.lower()
+    if is_sse:
+        headers["Cache-Control"] = "no-cache"
+        headers["X-Accel-Buffering"] = "no"
+
+    response = web.StreamResponse(
+        status=upstream.status,
+        reason=upstream.reason,
+        headers=headers,
+    )
+    await response.prepare(request)
+
+    chunks = 0
+    total_bytes = 0
+    if is_sse:
+        main.LOGGER.info(
+            "SSE stream opened for resource %s path %s",
+            resource_id,
+            request.path,
+        )
+
+    try:
+        async for chunk in upstream.content.iter_any():
+            if chunk:
+                chunks += 1
+                total_bytes += len(chunk)
+                await response.write(chunk)
+    except (ConnectionResetError, asyncio.CancelledError):
+        pass
+    finally:
+        if is_sse:
+            main.LOGGER.info(
+                "SSE stream closed for resource %s after %d chunk(s), %d byte(s)",
+                resource_id,
+                chunks,
+                total_bytes,
+            )
+        try:
+            await response.write_eof()
+        except (ConnectionResetError, RuntimeError):
+            pass
+
+    return response
+
+
 main.filtered_request_headers = filtered_request_headers
 main.bridge_runtime_script = enhanced_bridge_runtime_script
+main.stream_upstream_response = stream_upstream_response
 
 from server import _run  # noqa: E402
 

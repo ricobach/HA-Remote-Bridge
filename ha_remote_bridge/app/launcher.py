@@ -2,7 +2,7 @@
 
 Keeps Home Assistant Ingress header handling separate from the deliberately
 small set of headers forwarded to LAN resources, while applying compatibility
-rules for browser APIs such as EventSource.
+rules for browser APIs such as EventSource and approved companion API origins.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import asyncio
 import json
 from urllib.parse import urlparse
 
-from aiohttp import web
+from aiohttp import ClientError, ClientTimeout, web
 
 import main
 from ui_shell import INDEX_HTML as TABBED_INDEX_HTML
@@ -32,10 +32,25 @@ _UPSTREAM_HEADER_ALLOWLIST = {
     "x-requested-with",
 }
 
+# Companion origins are deliberately server-defined. Browser code can only
+# select one of these named endpoints; it cannot provide an arbitrary URL.
+_COMPANION_ORIGINS = {
+    "myip.dk": {
+        "ipv4": "https://ipv4.myip.dk",
+        "ipv6": "https://ipv6.myip.dk",
+    },
+}
+
 
 def _is_event_stream_target(target: str) -> bool:
     """Return True for the conventional SSE events endpoint used by ESPHome."""
     return urlparse(target).path.rstrip("/").endswith("/events")
+
+
+def _companion_policy(target_url: str) -> dict[str, str]:
+    """Return approved companion endpoints for one configured resource."""
+    hostname = (urlparse(target_url).hostname or "").lower()
+    return _COMPANION_ORIGINS.get(hostname, {})
 
 
 def filtered_request_headers(
@@ -73,20 +88,41 @@ def filtered_request_headers(
     return headers
 
 
+def companion_request_headers(request: web.Request, resource: dict) -> dict[str, str]:
+    """Build browser-like headers for an approved companion API request."""
+    headers = {
+        key: value
+        for key, value in request.headers.items()
+        if key.lower() in _UPSTREAM_HEADER_ALLOWLIST
+    }
+    resource_url = urlparse(resource["url"])
+    resource_origin = f"{resource_url.scheme}://{resource_url.netloc}"
+    headers["Origin"] = resource_origin
+    headers["Referer"] = resource["url"].rstrip("/") + "/"
+    return headers
+
+
 _original_bridge_runtime_script = main.bridge_runtime_script
 
 
 def enhanced_bridge_runtime_script(prefix: str, resource_id: str, target_url: str) -> str:
-    """Extend the browser shim for Request/URL objects and EventSource."""
+    """Extend the browser shim for Request/URL objects, EventSource and companion APIs."""
     original = _original_bridge_runtime_script(prefix, resource_id, target_url)
     bridge = f"{prefix}proxy/{resource_id}"
+    companion_bridge = f"{prefix}companion/{resource_id}"
     target = urlparse(target_url)
     target_origin = f"{target.scheme}://{target.netloc}"
+    companion_by_origin = {
+        origin: key
+        for key, origin in _companion_policy(target_url).items()
+    }
 
     extension = f"""<script data-ha-remote-bridge-extended>
 (() => {{
   const bridge = {json.dumps(bridge)};
+  const companionBridge = {json.dumps(companion_bridge)};
   const targetOrigin = {json.dumps(target_origin)};
+  const companionOrigins = {json.dumps(companion_by_origin)};
 
   const rewrite = (value) => {{
     if (value instanceof URL) value = value.href;
@@ -94,9 +130,18 @@ def enhanced_bridge_runtime_script(prefix: str, resource_id: str, target_url: st
     try {{
       const u = new URL(value, window.location.href);
       const target = new URL(targetOrigin);
-      const alreadyBridged = u.origin === window.location.origin &&
-        (u.pathname === bridge || u.pathname.startsWith(bridge + '/'));
+      const alreadyBridged = u.origin === window.location.origin && (
+        u.pathname === bridge || u.pathname.startsWith(bridge + '/') ||
+        u.pathname === companionBridge || u.pathname.startsWith(companionBridge + '/')
+      );
       if (alreadyBridged) return u.href;
+
+      const companionKey = companionOrigins[u.origin];
+      if (companionKey) {{
+        return window.location.protocol + '//' + window.location.host +
+          companionBridge + '/' + encodeURIComponent(companionKey) +
+          u.pathname + u.search + u.hash;
+      }}
 
       const sameTarget = u.host === target.host;
       const rootRelative = value.startsWith('/');
@@ -112,8 +157,10 @@ def enhanced_bridge_runtime_script(prefix: str, resource_id: str, target_url: st
       const raw = value instanceof Request ? value.url : (value instanceof URL ? value.href : value);
       if (typeof raw !== 'string') return false;
       const u = new URL(raw, window.location.href);
-      return u.origin === window.location.origin &&
-        (u.pathname === bridge || u.pathname.startsWith(bridge + '/'));
+      return u.origin === window.location.origin && (
+        u.pathname === bridge || u.pathname.startsWith(bridge + '/') ||
+        u.pathname === companionBridge || u.pathname.startsWith(companionBridge + '/')
+      );
     }} catch (_) {{
       return false;
     }}
@@ -217,10 +264,103 @@ async def stream_upstream_response(
     return response
 
 
+async def proxy_companion(request: web.Request) -> web.StreamResponse:
+    """Relay a request to a server-approved companion origin."""
+    if main.CLIENT is None:
+        raise web.HTTPServiceUnavailable(text="Proxy client is not ready")
+
+    resource_id = request.match_info["resource_id"]
+    companion_key = request.match_info["companion_key"]
+    tail = request.match_info.get("tail", "")
+    resource = main.STORE.get(resource_id)
+    if resource is None:
+        raise web.HTTPNotFound(text="Unknown resource")
+
+    origin = _companion_policy(resource["url"]).get(companion_key)
+    if origin is None:
+        raise web.HTTPForbidden(text="Companion origin is not approved for this resource")
+
+    target = origin.rstrip("/") + "/" + tail.lstrip("/")
+    if request.query_string:
+        target += "?" + request.query_string
+    body = await request.read() if request.can_read_body else None
+
+    try:
+        upstream = await main.CLIENT.request(
+            request.method,
+            target,
+            headers=companion_request_headers(request, resource),
+            data=body,
+            allow_redirects=False,
+            timeout=ClientTimeout(total=30, connect=15, sock_connect=15),
+        )
+        try:
+            raw_body = await upstream.read()
+            headers = main.copy_response_headers(upstream)
+            headers.popall("Access-Control-Allow-Origin", None)
+            headers.popall("Access-Control-Allow-Credentials", None)
+            headers.popall("Access-Control-Allow-Methods", None)
+            headers.popall("Access-Control-Allow-Headers", None)
+
+            if upstream.headers.get("Location"):
+                location = urlparse(upstream.headers["Location"])
+                if location.scheme and location.netloc:
+                    allowed_origin = f"{location.scheme}://{location.netloc}"
+                    allowed_key = next(
+                        (key for key, value in _companion_policy(resource["url"]).items() if value == allowed_origin),
+                        None,
+                    )
+                    if allowed_key:
+                        location_path = location.path.lstrip("/")
+                        query = f"?{location.query}" if location.query else ""
+                        headers["Location"] = (
+                            f"{main.ingress_prefix(request)}companion/{resource_id}/{allowed_key}/{location_path}{query}"
+                        )
+
+            main.LOGGER.info(
+                "Companion request %s %s -> %s %s",
+                request.method,
+                companion_key,
+                upstream.status,
+                target,
+            )
+            return web.Response(
+                status=upstream.status,
+                reason=upstream.reason,
+                headers=headers,
+                body=b"" if request.method == "HEAD" else raw_body,
+            )
+        finally:
+            upstream.release()
+    except (ClientError, asyncio.TimeoutError) as err:
+        main.LOGGER.warning(
+            "Companion request failed for %s/%s: %r",
+            resource["name"],
+            companion_key,
+            err,
+        )
+        raise web.HTTPBadGateway(text=f"Unable to reach companion service: {err}") from err
+
+
+_original_create_app = main.create_app
+
+
+def create_app() -> web.Application:
+    """Create the app and add the restricted companion-origin relay."""
+    app = _original_create_app()
+    app.router.add_route(
+        "*",
+        "/companion/{resource_id}/{companion_key}/{tail:.*}",
+        proxy_companion,
+    )
+    return app
+
+
 main.filtered_request_headers = filtered_request_headers
 main.bridge_runtime_script = enhanced_bridge_runtime_script
 main.stream_upstream_response = stream_upstream_response
 main.INDEX_HTML = TABBED_INDEX_HTML
+main.create_app = create_app
 
 from server import _run  # noqa: E402
 

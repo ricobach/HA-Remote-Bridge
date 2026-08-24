@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.7
+
+- Fixed duplicate Home Assistant Ingress path rewriting in the injected browser shim.
+- Prevents already-proxied URLs such as ESPHome `/events` from being wrapped a second time into paths like `/proxy/<id>/api/hassio_ingress/.../proxy/<id>/events`.
+- Makes EventSource rewriting idempotent for ESPHome Server-Sent Events.
+- Hardens modern `fetch()` handling so already-bridged URLs bypass the older string-only rewrite path.
+
 ## 0.1.6
 
 - Hardened ESPHome `/events` Server-Sent Events proxying.

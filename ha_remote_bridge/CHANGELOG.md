@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.10
+
+- Added targeted JavaScript response rewriting for OPNsense dashboard widget modules loaded with native dynamic `import()`.
+- Rewrites only the known `/ui/js/widgets/` module root through the active HA Remote Bridge resource path.
+- Fixes widget imports such as `SystemInformation.js`, `Cpu.js`, `Interfaces.js`, `Traffic.js`, `Firewall.js`, and similar modules that otherwise escape to the Home Assistant host and return `404`.
+- Keeps the ESPHome SSE, MyIP companion-origin relay, tabbed UI, cookies, and general proxy behavior unchanged.
+
 ## 0.1.9
 
 - Added restricted companion-origin proxying for applications that fetch data from approved secondary hosts.

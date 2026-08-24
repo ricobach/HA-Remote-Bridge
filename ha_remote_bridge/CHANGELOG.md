@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.12
+
+- Made the OPNsense widget-module compatibility path deterministic instead of relying on imported server bindings.
+- Starts the patched compatibility app directly and logs `Compatibility runner 0.1.12 active` at startup.
+- Cache-busts `opnsense_widget_manager.js` from rewritten OPNsense HTML so the browser cannot keep executing an older unmodified copy.
+- Continues rewriting OPNsense native dynamic `import('/ui/js/widgets/...')` paths through the active resource proxy.
+- Keeps the existing ESPHome SSE, MyIP companion-origin relay, tabbed UI, cookie handling, and general proxy behavior unchanged.
+
 ## 0.1.11
 
 - Forces OPNsense `opnsense_widget_manager.js` rewriting by filename even when the upstream server uses an unexpected JavaScript MIME type.

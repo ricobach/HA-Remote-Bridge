@@ -1,14 +1,14 @@
 """Compatibility runner for HA Remote Bridge.
 
-Adds narrowly scoped JavaScript response rewriting for applications such as
-OPNsense that use root-relative dynamic import() module paths. All existing
-launcher proxy, ESPHome SSE, cookie, tab UI, and companion-origin behavior is
-reused unchanged.
+Adds narrowly scoped response rewriting for applications such as OPNsense that
+use root-relative dynamic import() module paths. All existing launcher proxy,
+ESPHome SSE, cookie, tab UI, and companion-origin behavior is reused.
 """
 
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import PurePosixPath
 
 from aiohttp import ClientError, ClientTimeout, web
@@ -17,12 +17,27 @@ import launcher  # applies the existing runtime patches before server startup
 import main
 
 
+BRIDGE_COMPAT_VERSION = "0.1.12"
 _original_rewrite_text_body = main.rewrite_text_body
 
 
 def _is_opnsense_widget_manager(tail: str) -> bool:
     """Return True for OPNsense's dynamic dashboard widget loader."""
     return PurePosixPath("/" + tail.lstrip("/")).name == "opnsense_widget_manager.js"
+
+
+def _cache_bust_widget_manager_html(text: str) -> str:
+    """Force browsers to fetch the bridge-rewritten OPNsense manager script."""
+    pattern = re.compile(r"opnsense_widget_manager\.js(?:\?[^\"'<>\s]*)?", re.IGNORECASE)
+
+    def replace(match: re.Match[str]) -> str:
+        value = match.group(0)
+        if "hrb=" in value:
+            return re.sub(r"([?&])hrb=[^&\"'<>\s]*", rf"\1hrb={BRIDGE_COMPAT_VERSION}", value)
+        separator = "&" if "?" in value else "?"
+        return f"{value}{separator}hrb={BRIDGE_COMPAT_VERSION}"
+
+    return pattern.sub(replace, text)
 
 
 def rewrite_text_body(
@@ -37,38 +52,43 @@ def rewrite_text_body(
     """Rewrite normal text bodies plus OPNsense dynamic widget module roots."""
     lowered = content_type.lower()
 
-    if not force_opnsense_widgets and "javascript" not in lowered and "ecmascript" not in lowered:
-        return _original_rewrite_text_body(
-            body,
-            content_type,
-            resource,
-            resource_id,
-            prefix,
-        )
-
-    text = body.decode("utf-8", errors="replace")
-    bridge = f"{prefix}proxy/{resource_id}"
-
-    # OPNsense's widget manager uses native dynamic import() with module URLs
-    # rooted at /ui/js/widgets/. Native import() cannot be monkey-patched in
-    # the browser, so rewrite this known module root before delivery.
-    old = "/ui/js/widgets/"
-    new = f"{bridge}/ui/js/widgets/"
-    replacements = text.count(old)
-    text = text.replace(old, new)
-
     if force_opnsense_widgets:
+        text = body.decode("utf-8", errors="replace")
+        bridge = f"{prefix}proxy/{resource_id}"
+        old = "/ui/js/widgets/"
+        new = f"{bridge}/ui/js/widgets/"
+        replacements = text.count(old)
+        text = text.replace(old, new)
         main.LOGGER.info(
             "OPNsense widget manager rewrite for resource %s: %d occurrence(s)",
             resource_id,
             replacements,
         )
+        return text.encode("utf-8", errors="replace")
 
-    return text.encode("utf-8", errors="replace")
+    rewritten = _original_rewrite_text_body(
+        body,
+        content_type,
+        resource,
+        resource_id,
+        prefix,
+    )
+
+    if "text/html" in lowered:
+        text = rewritten.decode("utf-8", errors="replace")
+        updated = _cache_bust_widget_manager_html(text)
+        if updated != text:
+            main.LOGGER.info(
+                "OPNsense widget manager cache-bust injected for resource %s",
+                resource_id,
+            )
+        return updated.encode("utf-8", errors="replace")
+
+    return rewritten
 
 
 async def proxy(request: web.Request) -> web.StreamResponse:
-    """Proxy a resource, additionally rewriting targeted JavaScript bodies."""
+    """Proxy a resource, additionally rewriting targeted OPNsense assets."""
     if main.CLIENT is None:
         raise web.HTTPServiceUnavailable(text="Proxy client is not ready")
 
@@ -86,9 +106,6 @@ async def proxy(request: web.Request) -> web.StreamResponse:
     is_widget_manager = _is_opnsense_widget_manager(tail)
     request_headers = main.filtered_request_headers(request, target, resource_id)
 
-    # The OPNsense asset URL is versioned but can remain unchanged across
-    # HA Remote Bridge releases. Do not allow a 304 to make the browser reuse
-    # an older, unrewritten copy of the widget manager.
     if is_widget_manager:
         for header in ("If-None-Match", "If-Modified-Since"):
             request_headers.pop(header, None)
@@ -141,8 +158,6 @@ async def proxy(request: web.Request) -> web.StreamResponse:
                 )
 
             if is_widget_manager:
-                # Ensure the rewritten script is used immediately after an App
-                # update instead of a stale browser copy.
                 headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
                 headers["Pragma"] = "no-cache"
                 headers.popall("ETag", None)
@@ -161,12 +176,30 @@ async def proxy(request: web.Request) -> web.StreamResponse:
         raise web.HTTPBadGateway(text=f"Unable to reach {resource['name']}: {err}") from err
 
 
-# launcher.create_app calls the original main.create_app function. That function
-# resolves its global `proxy` handler when it builds the router, so replacing it
-# here keeps all launcher-added routes while installing this compatibility path.
 main.rewrite_text_body = rewrite_text_body
 main.proxy = proxy
 
 
+async def _run() -> None:
+    """Start the patched app without relying on server.py's imported bindings."""
+    app = launcher.create_app()
+    runner = web.AppRunner(
+        app,
+        access_log=main.LOGGER,
+        max_line_size=64 * 1024,
+        max_field_size=64 * 1024,
+        max_headers=128 * 1024,
+    )
+    await runner.setup()
+    site = web.TCPSite(runner, host="0.0.0.0", port=main.PORT)
+    await site.start()
+    main.LOGGER.info("Compatibility runner %s active", BRIDGE_COMPAT_VERSION)
+
+    try:
+        await asyncio.Event().wait()
+    finally:
+        await runner.cleanup()
+
+
 if __name__ == "__main__":
-    asyncio.run(launcher._run())
+    asyncio.run(_run())

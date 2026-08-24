@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.6
+
+- Hardened ESPHome `/events` Server-Sent Events proxying.
+- Preserves `Last-Event-ID` for native EventSource reconnect semantics.
+- Forces `Accept: text/event-stream`, `Cache-Control: no-cache`, and `Accept-Encoding: identity` for `/events` requests to keep embedded-device traffic small and deterministic.
+- Adds `Cache-Control: no-cache` and `X-Accel-Buffering: no` on streamed SSE responses.
+- Replaced the EventSource wrapper with a native subclass-style shim for better browser compatibility.
+- Added SSE open/close diagnostics including chunk and byte counts.
+
 ## 0.1.5
 
 - Extended the injected browser compatibility shim to rewrite `fetch()` calls that use `Request` objects or `URL` objects, not only plain string URLs.

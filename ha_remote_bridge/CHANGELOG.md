@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.11
+
+- Forces OPNsense `opnsense_widget_manager.js` rewriting by filename even when the upstream server uses an unexpected JavaScript MIME type.
+- Disables conditional requests and browser caching for the rewritten widget-manager script so stale unmodified copies cannot keep loading `/ui/js/widgets/...` from the Home Assistant origin.
+- Adds diagnostics showing how many OPNsense widget module roots were rewritten for each resource request.
+- Keeps the existing ESPHome SSE, MyIP companion-origin relay, tabbed UI, cookie handling, and general proxy behavior unchanged.
+
 ## 0.1.10
 
 - Added targeted JavaScript response rewriting for OPNsense dashboard widget modules loaded with native dynamic `import()`.

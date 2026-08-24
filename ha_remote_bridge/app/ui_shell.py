@@ -14,7 +14,7 @@ INDEX_HTML = """<!doctype html>
     .shell { height: 100vh; display: flex; flex-direction: column; min-height: 0; }
     .topbar { background: var(--card-background-color, #fff); border-bottom: 1px solid #8883; box-shadow: 0 1px 5px #0002; z-index: 10; }
     .tabs { display: flex; align-items: end; gap: 4px; padding: 8px 10px 0; overflow-x: auto; scrollbar-width: thin; }
-    .tab { display: inline-flex; align-items: center; gap: 8px; min-width: 110px; max-width: 230px; height: 38px; padding: 0 10px; border: 1px solid transparent; border-radius: 9px 9px 0 0; background: #8881; color: inherit; cursor: pointer; user-select: none; white-space: nowrap; }
+    .tab { display: inline-flex; align-items: center; gap: 8px; min-width: 110px; max-width: 230px; height: 38px; padding: 0 10px; border: 1px solid transparent; border-radius: 9px 9px 0 0; background: #8881; color: inherit; cursor: pointer; user-select: none; white-space: nowrap; font: inherit; }
     .tab:hover { background: #8882; }
     .tab.active { background: var(--primary-background-color, #fafafa); border-color: #8883; border-bottom-color: var(--primary-background-color, #fafafa); }
     .tab-label { overflow: hidden; text-overflow: ellipsis; flex: 1; }
@@ -139,10 +139,12 @@ INDEX_HTML = """<!doctype html>
       return;
     }
 
-    const tab = document.createElement('button');
-    tab.type = 'button';
+    const tab = document.createElement('div');
     tab.className = 'tab';
     tab.title = resource.name;
+    tab.tabIndex = 0;
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-label', resource.name);
 
     const label = document.createElement('span');
     label.className = 'tab-label';
@@ -161,6 +163,12 @@ INDEX_HTML = """<!doctype html>
 
     tab.append(label, close);
     tab.addEventListener('click', () => setActive(resource.id));
+    tab.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        setActive(resource.id);
+      }
+    });
     tabs.append(tab);
 
     const view = document.createElement('section');

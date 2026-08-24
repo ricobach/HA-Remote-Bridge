@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.9
+
+- Added restricted companion-origin proxying for applications that fetch data from approved secondary hosts.
+- Added MyIP companion endpoints for `https://ipv4.myip.dk` and `https://ipv6.myip.dk` so `/api/ip` requests stay inside the Home Assistant Ingress origin.
+- Fixes browser CORS and network-access-policy failures when the proxied MyIP page fetches its IPv4/IPv6 JSON data.
+- Companion destinations are resolved from a server-side allowlist keyed by the configured resource; browser code cannot supply an arbitrary proxy destination.
+- Keeps the tabbed UI and ESPHome/OPNsense proxy behavior from 0.1.8 unchanged.
+
 ## 0.1.8
 
 - Added a browser-style top tab bar to the HA Remote Bridge manager.

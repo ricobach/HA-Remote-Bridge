@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.13
+
+- Added an Edit action to each resource on the App dashboard.
+- Added a validated `PUT /api/resources/{resource_id}` endpoint for updating resource name, URL, and TLS verification.
+- Preserves the existing resource ID and any extra resource metadata when editing, keeping cookie/session isolation stable.
+- Refreshes an already-open session tab against the edited target after saving changes.
+- Shows the current TLS verification state on each resource card.
+
 ## 0.1.12
 
 - Made the OPNsense widget-module compatibility path deterministic instead of relying on imported server bindings.

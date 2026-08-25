@@ -4,6 +4,12 @@ from ui_shell_v4 import INDEX_HTML as BASE_INDEX_HTML
 
 INDEX_HTML = BASE_INDEX_HTML
 
+# Make the SSH naming semantics explicit in the form.
+INDEX_HTML = INDEX_HTML.replace(
+    '<label>Name<input id="ssh-name" type="text" required placeholder="Server"></label>',
+    '<label>Session Name<input id="ssh-name" type="text" required placeholder="Server"></label>',
+)
+
 # Keep tab labels tied to the configured session/resource name. Remote page
 # titles are useful inside the iframe, but must not rename the bridge tab.
 INDEX_HTML = INDEX_HTML.replace(

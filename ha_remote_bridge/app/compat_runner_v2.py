@@ -14,7 +14,7 @@ import launcher
 import main
 import ssh_support as ssh
 import ssh_persistence  # noqa: F401  # replaces ssh.TTYD with tmux-backed manager
-from ui_shell_v6 import INDEX_HTML
+from ui_shell_v7 import INDEX_HTML
 
 BRIDGE_UI_VERSION = "0.2.2"
 

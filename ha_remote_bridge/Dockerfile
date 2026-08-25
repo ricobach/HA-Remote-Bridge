@@ -3,7 +3,7 @@ FROM ghcr.io/home-assistant/base:latest
 ARG BUILD_VERSION
 ARG BUILD_ARCH
 
-RUN apk add --no-cache python3 py3-aiohttp py3-zeroconf
+RUN apk add --no-cache python3 py3-aiohttp py3-zeroconf openssh-client ttyd
 
 COPY run.sh /run.sh
 COPY app /app

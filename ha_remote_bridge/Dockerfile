@@ -10,7 +10,8 @@ RUN apk add --no-cache \
     openssh-client-default \
     openssh-keygen \
     ttyd \
-    tmux
+    tmux \
+    novnc
 
 COPY run.sh /run.sh
 COPY app /app

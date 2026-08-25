@@ -1,8 +1,8 @@
 """Compatibility runner for HA Remote Bridge.
 
-Adds narrowly scoped response rewriting for applications such as OPNsense that
-use root-relative dynamic import() module paths. All existing launcher proxy,
-ESPHome SSE, cookie, tab UI, and companion-origin behavior is reused.
+Adds narrowly scoped response rewriting for applications such as OPNsense and
+standalone passive ESPHome web-server discovery. Existing launcher proxy,
+ESPHome SSE, cookies, tabs, edit UI, and companion-origin behavior are reused.
 """
 
 from __future__ import annotations
@@ -15,10 +15,12 @@ from aiohttp import ClientError, ClientTimeout, web
 
 import launcher  # applies the existing runtime patches before server startup
 import main
+from esphome_discovery import ESPHomeDiscovery
 
 
-BRIDGE_COMPAT_VERSION = "0.1.12"
+BRIDGE_COMPAT_VERSION = "0.1.14"
 _original_rewrite_text_body = main.rewrite_text_body
+DISCOVERY = ESPHomeDiscovery()
 
 
 def _is_opnsense_widget_manager(tail: str) -> bool:
@@ -85,6 +87,109 @@ def rewrite_text_body(
         return updated.encode("utf-8", errors="replace")
 
     return rewritten
+
+
+def _with_discovery_ui(html: str) -> str:
+    """Add a discovered ESPHome section to the existing dashboard shell."""
+    panel = """
+        <section class="card">
+          <div class="row">
+            <div>
+              <div class="resource-name">Discovered ESPHome devices</div>
+              <div class="resource-meta">Passive mDNS discovery. Only ESPHome nodes advertising a usable web server are shown.</div>
+            </div>
+            <button id="refresh-discovery" class="action secondary" type="button">Refresh</button>
+          </div>
+          <div id="discovered-esphome" style="margin-top:14px"><div class="empty">Searching for ESPHome devices…</div></div>
+        </section>
+"""
+    marker = '        <section id="resources"></section>'
+    if marker in html:
+        html = html.replace(marker, panel + "\n" + marker, 1)
+
+    script = r"""
+
+  async function loadDiscoveredESPHome() {
+    const host = document.getElementById('discovered-esphome');
+    if (!host) return;
+    try {
+      const response = await fetch(api('api/discovery/esphome'), {cache: 'no-store'});
+      if (!response.ok) throw new Error(await response.text());
+      const devices = await response.json();
+      host.innerHTML = '';
+      if (!devices.length) {
+        host.innerHTML = '<div class="empty">No unconfigured ESPHome web servers discovered yet.</div>';
+        return;
+      }
+
+      for (const device of devices) {
+        const row = document.createElement('div');
+        row.className = 'row';
+        row.style.padding = '10px 0';
+        row.style.borderTop = '1px solid #8882';
+
+        const info = document.createElement('div');
+        const name = document.createElement('div');
+        name.className = 'resource-name';
+        name.textContent = device.name;
+        const url = document.createElement('div');
+        url.className = 'resource-url';
+        url.textContent = device.url;
+        const meta = document.createElement('div');
+        meta.className = 'resource-meta';
+        const details = [];
+        if (device.version) details.push('ESPHome ' + device.version);
+        if (device.mac) details.push(device.mac);
+        details.push(device.hostname);
+        meta.textContent = details.join(' · ');
+        info.append(name, url, meta);
+
+        const add = document.createElement('button');
+        add.type = 'button';
+        add.className = 'action';
+        add.textContent = 'Add';
+        add.onclick = async () => {
+          add.disabled = true;
+          const result = await fetch(api('api/resources'), {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              name: device.name,
+              url: device.url,
+              verify_ssl: false,
+            }),
+          });
+          if (!result.ok) {
+            add.disabled = false;
+            alert(await result.text());
+            return;
+          }
+          await load();
+          await loadDiscoveredESPHome();
+        };
+
+        row.append(info, add);
+        host.append(row);
+      }
+    } catch (error) {
+      host.innerHTML = '<div class="empty">ESPHome discovery unavailable: ' + String(error) + '</div>';
+    }
+  }
+
+  const discoveryRefresh = document.getElementById('refresh-discovery');
+  if (discoveryRefresh) discoveryRefresh.addEventListener('click', loadDiscoveredESPHome);
+  loadDiscoveredESPHome();
+  setInterval(loadDiscoveredESPHome, 10000);
+"""
+    final_marker = "\n  load();\n</script>"
+    if final_marker in html:
+        html = html.replace(final_marker, script + final_marker, 1)
+    return html
+
+
+async def list_discovered_esphome(request: web.Request) -> web.Response:
+    """Return unconfigured ESPHome web servers currently visible via mDNS."""
+    return web.json_response(DISCOVERY.snapshot(main.STORE.resources))
 
 
 async def proxy(request: web.Request) -> web.StreamResponse:
@@ -178,11 +283,13 @@ async def proxy(request: web.Request) -> web.StreamResponse:
 
 main.rewrite_text_body = rewrite_text_body
 main.proxy = proxy
+main.INDEX_HTML = _with_discovery_ui(main.INDEX_HTML)
 
 
 async def _run() -> None:
-    """Start the patched app without relying on server.py's imported bindings."""
+    """Start the patched app and standalone ESPHome mDNS discovery."""
     app = launcher.create_app()
+    app.router.add_get("/api/discovery/esphome", list_discovered_esphome)
     runner = web.AppRunner(
         app,
         access_log=main.LOGGER,
@@ -190,6 +297,13 @@ async def _run() -> None:
         max_field_size=64 * 1024,
         max_headers=128 * 1024,
     )
+
+    try:
+        DISCOVERY.start()
+        main.LOGGER.info("ESPHome mDNS discovery active")
+    except Exception as err:  # discovery failure must never stop the proxy
+        main.LOGGER.warning("Unable to start ESPHome mDNS discovery: %r", err)
+
     await runner.setup()
     site = web.TCPSite(runner, host="0.0.0.0", port=main.PORT)
     await site.start()
@@ -198,6 +312,7 @@ async def _run() -> None:
     try:
         await asyncio.Event().wait()
     finally:
+        DISCOVERY.close()
         await runner.cleanup()
 
 

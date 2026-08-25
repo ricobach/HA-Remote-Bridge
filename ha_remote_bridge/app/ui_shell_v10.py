@@ -91,3 +91,13 @@ VNC_JS = r'''
   $('vnc-cancel').addEventListener('click',closeVNC);
 '''
 INDEX_HTML = INDEX_HTML.replace("  function showEdit(r){", VNC_JS + "\n  function showEdit(r){", 1)
+
+for required in (
+    'id="add-vnc"',
+    'id="vnc-dialog"',
+    "resource_type:'vnc'",
+    "kind==='vnc'?api('vnc/'",
+    "resourceKind(r)==='vnc'",
+):
+    if required not in INDEX_HTML:
+        raise RuntimeError(f"VNC UI composition failed: missing {required}")

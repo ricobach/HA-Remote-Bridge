@@ -1,5 +1,5 @@
 name: HA Remote Bridge
-version: "0.1.13"
+version: "0.1.14"
 slug: ha_remote_bridge
 description: Securely access selected local HTTP/HTTPS resources through Home Assistant Ingress.
 url: https://github.com/ricobach/HA-Remote-Bridge
@@ -10,6 +10,7 @@ startup: application
 boot: auto
 init: false
 stage: experimental
+host_network: true
 ingress: true
 ingress_port: 8099
 panel_icon: mdi:lan-connect

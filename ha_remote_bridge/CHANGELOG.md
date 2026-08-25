@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.0
+
+- Added first-class SSH resources alongside HTTP/HTTPS and ESPHome resources.
+- Added browser-based interactive SSH terminals using `ttyd` and the system OpenSSH client, proxied entirely through Home Assistant Ingress.
+- Added reusable SSH credential profiles so one private key can be shared by multiple SSH resources without re-entering it.
+- Added an App-local SSH credential vault under `/data/ssh` with private key files stored separately from normal resource definitions and permissions restricted to the App.
+- Private key material is never returned by the credential API; only safe metadata, fingerprints, and public keys are exposed to the dashboard.
+- Added ED25519 key generation from the dashboard with one-click public-key copying for installation on target hosts.
+- Added importing of existing OpenSSH/PEM private keys. Encrypted private keys remain encrypted and OpenSSH prompts for their passphrase when a session starts.
+- Added persistent SSH `known_hosts` handling with `StrictHostKeyChecking=accept-new`, so first-seen host keys are recorded and later host-key changes are rejected.
+- Added SSH resource creation/editing fields for host, port, username, and reusable credential selection.
+- Added SSH filtering, Online/Offline reachability checks using the SSH TCP port, and session-tab integration.
+- Added `openssh-client` and `ttyd` to the App image.
+
 ## 0.1.17
 
 - Added real Online/Offline status badges to configured resource cards.

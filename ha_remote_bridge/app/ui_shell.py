@@ -31,23 +31,35 @@ INDEX_HTML = """<!doctype html>
     .home-view { overflow: auto; }
     .home { max-width: 900px; margin: 0 auto; padding: 24px; }
     h1 { margin: 0 0 4px; font-size: 28px; }
+    h2 { margin: 0; font-size: 20px; }
     .subtitle { opacity: .7; margin: 0 0 24px; }
     .card { background: var(--card-background-color, #fff); border-radius: 12px; padding: 18px; margin-bottom: 16px; box-shadow: 0 2px 8px #0002; }
     .row { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
     .resource-name { font-weight: 650; font-size: 17px; }
     .resource-url { opacity: .7; font-size: 13px; overflow-wrap: anywhere; margin-top: 3px; }
+    .resource-meta { opacity: .6; font-size: 12px; margin-top: 4px; }
     .actions { display: flex; gap: 8px; flex-wrap: wrap; }
     button.action { border: 0; border-radius: 8px; padding: 10px 14px; cursor: pointer; text-decoration: none; font: inherit; background: var(--primary-color, #03a9f4); color: white; }
+    button.secondary { background: #607d8b; }
     button.danger { background: #c62828; }
-    form { display: grid; grid-template-columns: 1fr 2fr auto auto; gap: 10px; align-items: end; }
+    form.resource-form { display: grid; grid-template-columns: 1fr 2fr auto auto; gap: 10px; align-items: end; }
+    form.edit-form { display: grid; gap: 14px; }
     label { font-size: 12px; opacity: .8; display: grid; gap: 5px; }
     input[type=text], input[type=url] { padding: 10px; border: 1px solid #8887; border-radius: 8px; background: transparent; color: inherit; font: inherit; }
     .empty { opacity: .65; text-align: center; padding: 28px 4px; }
     .note { font-size: 13px; opacity: .7; }
     .session-frame { display: block; width: 100%; height: 100%; border: 0; background: white; }
+    dialog { width: min(560px, calc(100vw - 28px)); border: 0; border-radius: 14px; padding: 0; background: var(--card-background-color, #fff); color: inherit; box-shadow: 0 16px 60px #0007; }
+    dialog::backdrop { background: #0008; }
+    .dialog-body { padding: 20px; }
+    .dialog-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 18px; }
+    .dialog-close { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 24px; line-height: 1; padding: 4px 8px; border-radius: 8px; }
+    .dialog-close:hover { background: #8882; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+    .checkbox-row { display: flex; align-items: center; gap: 8px; font-size: 14px; opacity: .9; }
     @media (max-width: 700px) {
       .home { padding: 14px; }
-      form { grid-template-columns: 1fr; }
+      form.resource-form { grid-template-columns: 1fr; }
       .row { align-items: flex-start; flex-direction: column; }
       .tab { min-width: 95px; max-width: 170px; }
       .nav-title { display: none; }
@@ -77,7 +89,7 @@ INDEX_HTML = """<!doctype html>
         <p class="subtitle">Secure access to local resources through Home Assistant Ingress.</p>
 
         <section class="card">
-          <form id="add-form">
+          <form id="add-form" class="resource-form">
             <label>Name<input id="name" type="text" required placeholder="Kitchen ESPHome"></label>
             <label>Local URL<input id="url" type="url" required placeholder="http://192.168.1.50"></label>
             <label><span>Verify SSL</span><input id="verify" type="checkbox" checked></label>
@@ -91,6 +103,26 @@ INDEX_HTML = """<!doctype html>
     </section>
   </div>
 </div>
+
+<dialog id="edit-dialog">
+  <div class="dialog-body">
+    <div class="dialog-head">
+      <h2>Edit resource</h2>
+      <button id="edit-close" class="dialog-close" type="button" aria-label="Close">×</button>
+    </div>
+    <form id="edit-form" class="edit-form">
+      <input id="edit-id" type="hidden">
+      <label>Name<input id="edit-name" type="text" required></label>
+      <label>Local URL<input id="edit-url" type="url" required></label>
+      <label class="checkbox-row"><input id="edit-verify" type="checkbox"> Verify SSL certificate</label>
+      <div class="dialog-actions">
+        <button id="edit-cancel" class="action secondary" type="button">Cancel</button>
+        <button class="action" type="submit">Save changes</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
 <script>
   const base = window.location.pathname.endsWith('/') ? window.location.pathname : window.location.pathname + '/';
   const api = (path) => base + path;
@@ -105,6 +137,8 @@ INDEX_HTML = """<!doctype html>
   const forwardButton = document.getElementById('forward');
   const reloadButton = document.getElementById('reload');
   const navTitle = document.getElementById('nav-title');
+  const editDialog = document.getElementById('edit-dialog');
+  const editForm = document.getElementById('edit-form');
 
   function currentSession() {
     return activeSessionId ? sessions.get(activeSessionId) : null;
@@ -223,10 +257,55 @@ INDEX_HTML = """<!doctype html>
     }
   }
 
+  function showEdit(resource) {
+    document.getElementById('edit-id').value = resource.id;
+    document.getElementById('edit-name').value = resource.name;
+    document.getElementById('edit-url').value = resource.url;
+    document.getElementById('edit-verify').checked = resource.verify_ssl !== false;
+    editDialog.showModal();
+  }
+
+  function closeEdit() {
+    if (editDialog.open) editDialog.close();
+  }
+
   homeTab.addEventListener('click', () => setActive(null));
   backButton.addEventListener('click', () => navigate('back'));
   forwardButton.addEventListener('click', () => navigate('forward'));
   reloadButton.addEventListener('click', () => navigate('reload'));
+  document.getElementById('edit-close').addEventListener('click', closeEdit);
+  document.getElementById('edit-cancel').addEventListener('click', closeEdit);
+
+  editForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const resourceId = document.getElementById('edit-id').value;
+    const response = await fetch(api('api/resources/' + resourceId), {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        name: document.getElementById('edit-name').value,
+        url: document.getElementById('edit-url').value,
+        verify_ssl: document.getElementById('edit-verify').checked,
+      }),
+    });
+    if (!response.ok) {
+      alert(await response.text());
+      return;
+    }
+
+    const updated = await response.json();
+    const session = sessions.get(resourceId);
+    if (session) {
+      session.resource = updated;
+      session.label.textContent = updated.name;
+      session.tab.title = updated.name;
+      session.frame.title = updated.name;
+      session.frame.src = api('proxy/' + resourceId + '/');
+    }
+    closeEdit();
+    updateNavigation();
+    load();
+  });
 
   async function load() {
     const response = await fetch(api('api/resources'));
@@ -248,7 +327,10 @@ INDEX_HTML = """<!doctype html>
       const url = document.createElement('div');
       url.className = 'resource-url';
       url.textContent = resource.url;
-      info.append(name, url);
+      const meta = document.createElement('div');
+      meta.className = 'resource-meta';
+      meta.textContent = 'TLS verification: ' + (resource.verify_ssl === false ? 'off' : 'on');
+      info.append(name, url, meta);
 
       const actions = document.createElement('div');
       actions.className = 'actions';
@@ -257,6 +339,12 @@ INDEX_HTML = """<!doctype html>
       open.className = 'action';
       open.textContent = sessions.has(resource.id) ? 'Show' : 'Open';
       open.onclick = () => openSession(resource);
+
+      const edit = document.createElement('button');
+      edit.type = 'button';
+      edit.className = 'action secondary';
+      edit.textContent = 'Edit';
+      edit.onclick = () => showEdit(resource);
 
       const remove = document.createElement('button');
       remove.type = 'button';
@@ -268,7 +356,7 @@ INDEX_HTML = """<!doctype html>
         await fetch(api('api/resources/' + resource.id), {method: 'DELETE'});
         load();
       };
-      actions.append(open, remove);
+      actions.append(open, edit, remove);
       card.append(info, actions);
       host.append(card);
     }

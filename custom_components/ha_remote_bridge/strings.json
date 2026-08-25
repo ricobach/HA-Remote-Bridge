@@ -1,0 +1,47 @@
+{
+  "title": "HA Remote Bridge",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add remote bridge resource",
+        "description": "Choose an ESPHome device already known to Home Assistant, or configure another web resource manually.",
+        "menu_options": {
+          "esphome": "ESPHome device",
+          "manual": "Manual resource"
+        }
+      },
+      "esphome": {
+        "title": "Add ESPHome device",
+        "description": "Select an ESPHome device already configured in Home Assistant. HA Remote Bridge will use its current host and mark the resource as an ESPHome profile.",
+        "data": {
+          "esphome_entry_id": "ESPHome device"
+        },
+        "data_description": {
+          "esphome_entry_id": "Devices already imported into HA Remote Bridge are hidden from this list."
+        }
+      },
+      "manual": {
+        "title": "Add local web resource",
+        "description": "Configure a local HTTP or HTTPS resource to access through Home Assistant.",
+        "data": {
+          "resource_name": "Name",
+          "url": "Local URL",
+          "verify_ssl": "Verify SSL certificate"
+        },
+        "data_description": {
+          "resource_name": "A friendly name for this resource.",
+          "url": "The local HTTP or HTTPS URL, for example http://192.168.1.50.",
+          "verify_ssl": "Disable only for local HTTPS services using a self-signed certificate."
+        }
+      }
+    },
+    "error": {
+      "invalid_url": "Enter a valid HTTP or HTTPS URL."
+    },
+    "abort": {
+      "already_configured": "This local resource is already configured.",
+      "no_esphome_devices": "No ESPHome devices are available to import. Add ESPHome devices to Home Assistant first, or all available devices have already been imported.",
+      "esphome_device_unavailable": "That ESPHome device is no longer available for import."
+    }
+  }
+}

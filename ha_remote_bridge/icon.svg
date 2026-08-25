@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">HA Remote Bridge</title>
+  <desc id="desc">A network signal above a bridged home</desc>
+  <defs>
+    <linearGradient id="bg" x1="32" y1="24" x2="224" y2="232" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#13b7e9"/>
+      <stop offset="1" stop-color="#1767e8"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="58" fill="url(#bg)"/>
+  <g fill="none" stroke="#fff" stroke-width="15" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M55 177h146"/>
+    <path d="M72 177v-55l56-46 56 46v55"/>
+    <path d="M99 177v-38h58v38"/>
+    <path d="M62 70c37-36 95-36 132 0"/>
+    <path d="M86 94c23-22 61-22 84 0"/>
+  </g>
+</svg>

@@ -264,6 +264,31 @@ async def stream_upstream_response(
     return response
 
 
+async def update_resource(request: web.Request) -> web.Response:
+    """Update a configured resource while preserving its stable resource id."""
+    resource_id = request.match_info["resource_id"]
+    resource = main.STORE.get(resource_id)
+    if resource is None:
+        raise web.HTTPNotFound(text="Unknown resource")
+
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        raise web.HTTPBadRequest(text="Invalid JSON")
+
+    name, url, verify_ssl = main.validate_resource_payload(payload)
+    resource.update(
+        {
+            "name": name,
+            "url": url,
+            "verify_ssl": verify_ssl,
+        }
+    )
+    await main.STORE.save()
+    main.LOGGER.info("Updated resource %s -> %s", name, url)
+    return web.json_response(resource)
+
+
 async def proxy_companion(request: web.Request) -> web.StreamResponse:
     """Relay a request to a server-approved companion origin."""
     if main.CLIENT is None:
@@ -346,8 +371,9 @@ _original_create_app = main.create_app
 
 
 def create_app() -> web.Application:
-    """Create the app and add the restricted companion-origin relay."""
+    """Create the app and add runtime API/companion routes."""
     app = _original_create_app()
+    app.router.add_put("/api/resources/{resource_id}", update_resource)
     app.router.add_route(
         "*",
         "/companion/{resource_id}/{companion_key}/{tail:.*}",

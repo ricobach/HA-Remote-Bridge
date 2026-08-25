@@ -107,6 +107,17 @@ async def delete_resource(request: web.Request) -> web.Response:
     return web.Response(status=204)
 
 
+async def close_ssh_session(request: web.Request) -> web.Response:
+    """Explicitly terminate one persistent SSH/tmux session without deleting its resource."""
+    resource_id = request.match_info["resource_id"]
+    resource = main.STORE.get(resource_id)
+    if resource is None or resource.get("resource_type") != "ssh":
+        raise web.HTTPNotFound(text="Unknown SSH resource")
+    await ssh.TTYD.stop(resource_id)
+    main.LOGGER.info("Closed persistent SSH session for %s", resource.get("name", resource_id))
+    return web.Response(status=204)
+
+
 async def _probe_resource(resource: dict) -> tuple[str, dict]:
     """Return a short reachability result for one configured resource."""
     resource_id = resource["id"]
@@ -162,6 +173,7 @@ async def _run() -> None:
     app.router.add_post("/api/ssh/credentials", ssh.add_credential)
     app.router.add_post("/api/ssh/credentials/generate", ssh.generate_credential)
     app.router.add_delete("/api/ssh/credentials/{credential_id}", ssh.delete_credential)
+    app.router.add_delete("/api/ssh/sessions/{resource_id}", close_ssh_session)
     app.router.add_route("*", "/ssh/{resource_id}/{tail:.*}", ssh.proxy_ssh_terminal)
 
     runner = web.AppRunner(

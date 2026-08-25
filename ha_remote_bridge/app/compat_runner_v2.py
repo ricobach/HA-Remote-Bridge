@@ -18,7 +18,7 @@ import launcher
 import main
 from ui_shell_v2 import INDEX_HTML
 
-BRIDGE_UI_VERSION = "0.1.15"
+BRIDGE_UI_VERSION = "0.1.16"
 
 
 async def add_resource(request: web.Request) -> web.Response:
@@ -51,7 +51,7 @@ async def add_resource(request: web.Request) -> web.Response:
 
 
 main.add_resource = add_resource
-main.INDEX_HTML = INDEX_HTML.replace("mDNS discovery active", "mDNS discovery enabled")
+main.INDEX_HTML = INDEX_HTML
 
 
 async def _run() -> None:

@@ -13,9 +13,10 @@ import compat_runner as compat
 import launcher
 import main
 import ssh_support as ssh
-from ui_shell_v4 import INDEX_HTML
+import ssh_persistence  # noqa: F401  # replaces ssh.TTYD with tmux-backed manager
+from ui_shell_v5 import INDEX_HTML
 
-BRIDGE_UI_VERSION = "0.2.0"
+BRIDGE_UI_VERSION = "0.2.1"
 
 
 async def add_resource(request: web.Request) -> web.Response:

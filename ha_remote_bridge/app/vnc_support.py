@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import html
 import mimetypes
 import os
 from pathlib import Path
-from urllib.parse import quote
 
 from aiohttp import WSMsgType, web
 
@@ -102,15 +102,17 @@ async def novnc_asset(request: web.Request) -> web.StreamResponse:
 
 async def vnc_page(request: web.Request) -> web.Response:
     resource = _get_vnc_resource(request.match_info["resource_id"])
-    session_name = str(resource.get("name", "VNC"))
+    session_name = html.escape(str(resource.get("name", "VNC")))
+    target_host = html.escape(str(resource["vnc_host"]))
+    target_port = int(resource.get("vnc_port", 5900))
     view_only = "true" if resource.get("vnc_view_only", False) else "false"
 
-    html = f'''<!doctype html>
+    page = f'''<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>{web.html_escape(session_name)}</title>
+<title>{session_name}</title>
 <style>
 html,body,#screen{{width:100%;height:100%;margin:0;background:#111;overflow:hidden;font-family:Roboto,system-ui,sans-serif}}
 #screen{{display:flex;align-items:center;justify-content:center}}
@@ -126,7 +128,7 @@ button{{border:1px solid #ccc;border-radius:5px;padding:8px 12px;background:#fff
 </head>
 <body>
 <div id="screen"></div>
-<div id="status">Connecting to {web.html_escape(resource['vnc_host'])}:{int(resource.get('vnc_port',5900))}…</div>
+<div id="status">Connecting to {target_host}:{target_port}…</div>
 <div id="credentials"><form id="credentials-form" class="card"><h2>VNC password</h2><p>This password is sent only to the active VNC server and is not stored by HA Remote Bridge.</p><input id="password" type="password" autocomplete="current-password" autofocus><div class="actions"><button class="primary" type="submit">Connect</button></div></form></div>
 <script type="module">
 const assetBase = new URL('../../novnc-assets/', window.location.href);
@@ -149,7 +151,7 @@ document.getElementById('credentials-form').addEventListener('submit', e => {{ e
 </script>
 </body>
 </html>'''
-    return web.Response(text=html, content_type="text/html", headers={"Cache-Control": "no-store"})
+    return web.Response(text=page, content_type="text/html", headers={"Cache-Control": "no-store"})
 
 
 async def vnc_websocket(request: web.Request) -> web.WebSocketResponse:

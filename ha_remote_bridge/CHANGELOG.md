@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.2
+
+- Added first-class connection grouping with an optional `Group / Host` name on Web and SSH resources.
+- Resources with the same explicit group name are rendered together under one host card while keeping independent connection/session IDs.
+- When no group name is set, resources that resolve to the same hostname or IP are grouped automatically.
+- Group cards can contain mixed protocols and ports, such as HTTPS `:443`, HTTP `:8080`, and SSH `:22` for the same host.
+- Each grouped endpoint keeps its own Online/Offline status, type badge, Open/Show, Edit, Delete, and session tab.
+- Discovered ESPHome devices use the ESPHome device name as their default group name when added.
+- Added Group / Host fields to Web add/edit and SSH add/edit dialogs.
+- Global search now matches Group / Host names as well as resource names and URLs.
+
 ## 0.2.1
 
 - Keeps session-tab labels tied to the configured Session/Resource Name instead of replacing them with the proxied page title.

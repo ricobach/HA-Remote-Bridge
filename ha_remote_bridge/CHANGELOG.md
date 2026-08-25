@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.17
+
+- Added real Online/Offline status badges to configured resource cards.
+- Added a lightweight `/api/resources/status` endpoint that probes all configured targets concurrently from the App container.
+- Treats any HTTP response as reachable/Online; connection failures and short timeouts are shown as Offline.
+- Shows `Checking…` while a configured resource has not received its first health result yet.
+- Marks currently discovered ESPHome mDNS devices as Online.
+- Refreshes configured-resource health every 15 seconds and on manual dashboard refresh.
+
 ## 0.1.16
 
 - Reworked the dashboard to visually align more closely with ESPHome Device Builder and Home Assistant.

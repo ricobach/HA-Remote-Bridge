@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.4
+
+- Added first-class VNC resources with Session Name, Group / Host, Host / IP, Port, and View Only settings.
+- Added a browser-based noVNC client inside the normal HA Remote Bridge session-tab UI.
+- VNC traffic is relayed only to the configured VNC resource; the App does not expose an arbitrary TCP/WebSocket proxy.
+- Added VNC Online/Offline checks based on TCP reachability of the configured VNC port.
+- Added VNC filtering and grouping alongside Web and SSH endpoints, so one host card can contain HTTP/HTTPS, SSH, and VNC connections on different ports.
+- VNC passwords are requested interactively by noVNC when needed and are not stored by HA Remote Bridge.
+- Added optional View Only mode to disable keyboard and mouse input for a VNC resource.
+- Added the Alpine `novnc` package to the App image and serves its ES-module assets through Home Assistant Ingress.
+- Switched the runtime to the current polished SSH UI plus VNC support.
+
+## 0.2.3
+
+- Reworked the SSH editor for narrow Home Assistant Ingress layouts.
+- Removed horizontal overflow and made the modal viewport-safe with vertical scrolling only when needed.
+- Simplified the SSH credential selector to friendly key names and moved fingerprint/type details into a compact summary.
+- Improved Session Name, Group / Host, Host / IP, Port, Username, and credential field layout.
+- Added a cleaner security note and sticky Save/Cancel actions.
+
 ## 0.2.2
 
 - Added first-class connection grouping with an optional `Group / Host` name on Web and SSH resources.

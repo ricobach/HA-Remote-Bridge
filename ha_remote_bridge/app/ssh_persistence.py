@@ -8,7 +8,7 @@ SSH client or commands running in that terminal.
 from __future__ import annotations
 
 import asyncio
-import socket
+import shlex
 import subprocess
 
 from aiohttp import web
@@ -73,8 +73,7 @@ class PersistentTTYDManager(ssh.TTYDManager):
             tmux_command = [
                 "tmux", "new-session", "-A",
                 "-s", self._tmux_name(resource_id),
-                "--",
-                *ssh_command,
+                shlex.join(ssh_command),
             ]
             command = [
                 "ttyd",

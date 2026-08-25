@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.16
+
+- Reworked the dashboard to visually align more closely with ESPHome Device Builder and Home Assistant.
+- Added a compact Home Assistant-style blue header with HA Remote Bridge branding and discovery status.
+- Added a single global device search field that filters configured and discovered devices together.
+- Added grid/list view switching for configured resources and discovered ESPHome devices.
+- Added an expandable Filters toolbar with configured-resource type filters and IPv4/IPv6 discovery filters.
+- Redesigned configured resources and discovered devices into compact ESPHome-style device cards with chips, metadata, and action rows.
+- Kept the Discovered ESPHome devices section collapsible.
+- Kept Add Resource as an expandable inline panel.
+- Preserved session tabs, close buttons, Back/Forward/Reload navigation, Edit/Delete, ESPHome mDNS discovery, ESPHome SSE support, MyIP companion proxying, and OPNsense compatibility behavior.
+
 ## 0.1.15
 
 - Redesigned the App dashboard around a branded blue header and cleaner card/table layout inspired by the new HA Remote Bridge visual mockup.

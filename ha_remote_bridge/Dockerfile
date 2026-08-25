@@ -9,7 +9,8 @@ RUN apk add --no-cache \
     py3-zeroconf \
     openssh-client-default \
     openssh-keygen \
-    ttyd
+    ttyd \
+    tmux
 
 COPY run.sh /run.sh
 COPY app /app

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1
+
+- Keeps session-tab labels tied to the configured Session/Resource Name instead of replacing them with the proxied page title.
+- Persists the list of open session tabs and the active tab in browser local storage, so leaving HA Remote Bridge and returning restores the same tabs.
+- Restores only non-sensitive session state (resource IDs and the selected tab); credentials are never stored in browser session state.
+- Added `tmux`-backed SSH terminals. `ttyd` is now only the browser attachment layer, while the actual SSH client runs inside a persistent tmux session per SSH resource.
+- SSH commands continue running when the HA Remote Bridge page or browser attachment is closed, as long as the HA Remote Bridge App/container itself remains running and the SSH connection stays alive.
+- Reopening a restored SSH tab reattaches to the existing tmux-backed terminal instead of starting a new shell.
+- Editing or deleting an SSH resource terminates its persistent tmux session so stale sessions cannot reconnect to an old target definition.
+
 ## 0.2.0
 
 - Added first-class SSH resources alongside HTTP/HTTPS and ESPHome resources.

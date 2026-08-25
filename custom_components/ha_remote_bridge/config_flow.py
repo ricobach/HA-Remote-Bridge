@@ -24,6 +24,14 @@ from .const import (
 _ESPHOME_DOMAIN = "esphome"
 
 
+def _http_url_for_host(host: str) -> str:
+    """Build an HTTP URL for a hostname or literal IPv6 address."""
+    normalized = host.strip().rstrip(".")
+    if ":" in normalized and not normalized.startswith("["):
+        normalized = f"[{normalized}]"
+    return f"http://{normalized}"
+
+
 class HARemoteBridgeConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for HA Remote Bridge."""
 
@@ -40,18 +48,28 @@ class HARemoteBridgeConfigFlow(ConfigFlow, domain=DOMAIN):
 
     def _esphome_candidates(self) -> dict[str, ConfigEntry]:
         """Return ESPHome entries that expose a host and are not already imported."""
+        bridge_entries = self.hass.config_entries.async_entries(DOMAIN)
         imported_entry_ids = {
             entry.data.get(CONF_SOURCE_ENTRY_ID)
-            for entry in self._async_current_entries()
+            for entry in bridge_entries
             if entry.data.get(CONF_RESOURCE_TYPE) == RESOURCE_TYPE_ESPHOME
         }
-
-        return {
-            entry.entry_id: entry
-            for entry in self.hass.config_entries.async_entries(_ESPHOME_DOMAIN)
-            if entry.data.get(CONF_HOST)
-            and entry.entry_id not in imported_entry_ids
+        configured_urls = {
+            str(entry.data.get(CONF_URL, "")).strip().rstrip("/").lower()
+            for entry in bridge_entries
+            if entry.data.get(CONF_URL)
         }
+
+        candidates: dict[str, ConfigEntry] = {}
+        for entry in self.hass.config_entries.async_entries(_ESPHOME_DOMAIN):
+            host = entry.data.get(CONF_HOST)
+            if not host or entry.entry_id in imported_entry_ids:
+                continue
+            if _http_url_for_host(str(host)).lower() in configured_urls:
+                continue
+            candidates[entry.entry_id] = entry
+
+        return candidates
 
     async def async_step_esphome(
         self, user_input: dict | None = None
@@ -66,8 +84,8 @@ class HARemoteBridgeConfigFlow(ConfigFlow, domain=DOMAIN):
             if esphome_entry is None:
                 return self.async_abort(reason="esphome_device_unavailable")
 
-            host = str(esphome_entry.data[CONF_HOST]).strip()
-            url = f"http://{host}".rstrip("/")
+            host = str(esphome_entry.data[CONF_HOST])
+            url = _http_url_for_host(host)
             unique_source = esphome_entry.unique_id or esphome_entry.entry_id
 
             await self.async_set_unique_id(f"esphome:{unique_source}")

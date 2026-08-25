@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.14
+
+- Added standalone passive ESPHome discovery directly in the App; the Home Assistant integration is not required.
+- Browses ESPHome mDNS services instead of scanning the LAN.
+- Correlates `_esphomelib._tcp` identity with `_http._tcp` web-server advertisements so only ESPHome nodes with a usable web endpoint are offered.
+- Added a `Discovered ESPHome devices` dashboard section with automatic refresh and one-click Add buttons.
+- Filters devices that are already configured as resources.
+- Supports ESPHome custom web-server ports and IPv4/IPv6 addresses.
+- Added `py3-zeroconf` and host-network mode so multicast mDNS discovery works reliably from the App container.
+- Discovery failure is isolated from the proxy; the existing resource proxy continues to start even if mDNS is unavailable.
+
 ## 0.1.13
 
 - Added an Edit action to each resource on the App dashboard.

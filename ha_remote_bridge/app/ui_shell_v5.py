@@ -38,7 +38,7 @@ INDEX_HTML = INDEX_HTML.replace(
 
 INDEX_HTML = INDEX_HTML.replace(
     "  function closeSession(id){const s=sessions.get(id);if(!s)return;const active=activeSessionId===id;s.tab.remove();s.view.remove();sessions.delete(id);if(active){const ids=[...sessions.keys()];setActive(ids.length?ids[ids.length-1]:null);}}",
-    "  function closeSession(id){const s=sessions.get(id);if(!s)return;const active=activeSessionId===id;s.tab.remove();s.view.remove();sessions.delete(id);if(active){const ids=[...sessions.keys()];setActive(ids.length?ids[ids.length-1]:null);}else{saveSessionState();}}",
+    "  function closeSession(id){const s=sessions.get(id);if(!s)return;const active=activeSessionId===id;if(resourceKind(s.resource)==='ssh'){fetch(api('api/ssh/sessions/'+id),{method:'DELETE'}).catch(()=>{});}s.tab.remove();s.view.remove();sessions.delete(id);if(active){const ids=[...sessions.keys()];setActive(ids.length?ids[ids.length-1]:null);}else{saveSessionState();}}",
 )
 
 # Restore sessions after configured resources are known. Invalid/deleted resource

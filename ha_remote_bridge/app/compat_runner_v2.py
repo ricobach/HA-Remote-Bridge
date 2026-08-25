@@ -14,9 +14,24 @@ import launcher
 import main
 import ssh_support as ssh
 import ssh_persistence  # noqa: F401  # replaces ssh.TTYD with tmux-backed manager
-from ui_shell_v5 import INDEX_HTML
+from ui_shell_v6 import INDEX_HTML
 
-BRIDGE_UI_VERSION = "0.2.1"
+BRIDGE_UI_VERSION = "0.2.2"
+
+
+def _group_name_from_payload(payload: dict) -> str | None:
+    value = str(payload.get("group_name", "")).strip()
+    if len(value) > 100:
+        raise web.HTTPBadRequest(text="Group / Host name is too long")
+    return value or None
+
+
+def _apply_group_name(resource: dict, payload: dict) -> None:
+    group_name = _group_name_from_payload(payload)
+    if group_name:
+        resource["group_name"] = group_name
+    else:
+        resource.pop("group_name", None)
 
 
 async def add_resource(request: web.Request) -> web.Response:
@@ -55,9 +70,16 @@ async def add_resource(request: web.Request) -> web.Response:
         if resource_type == "esphome" and discovery_key:
             resource["discovery_key"] = discovery_key[:255]
 
+    _apply_group_name(resource, payload)
     main.STORE.resources.append(resource)
     await main.STORE.save()
-    main.LOGGER.info("Added resource %s -> %s (%s)", resource["name"], resource["url"], resource.get("resource_type", "http"))
+    main.LOGGER.info(
+        "Added resource %s -> %s (%s, group=%s)",
+        resource["name"],
+        resource["url"],
+        resource.get("resource_type", "http"),
+        resource.get("group_name", "auto"),
+    )
     return web.json_response(resource, status=201)
 
 
@@ -90,8 +112,14 @@ async def update_resource(request: web.Request) -> web.Response:
         name, url, verify_ssl = main.validate_resource_payload(payload)
         resource.update({"name": name, "url": url, "verify_ssl": verify_ssl})
 
+    _apply_group_name(resource, payload)
     await main.STORE.save()
-    main.LOGGER.info("Updated resource %s -> %s", resource["name"], resource["url"])
+    main.LOGGER.info(
+        "Updated resource %s -> %s (group=%s)",
+        resource["name"],
+        resource["url"],
+        resource.get("group_name", "auto"),
+    )
     return web.json_response(resource)
 
 

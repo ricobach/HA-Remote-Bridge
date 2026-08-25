@@ -51,7 +51,7 @@ async def add_resource(request: web.Request) -> web.Response:
 
 
 main.add_resource = add_resource
-main.INDEX_HTML = INDEX_HTML
+main.INDEX_HTML = INDEX_HTML.replace("mDNS discovery active", "mDNS discovery enabled")
 
 
 async def _run() -> None:

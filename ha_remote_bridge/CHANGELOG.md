@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.15
+
+- Redesigned the App dashboard around a branded blue header and cleaner card/table layout inspired by the new HA Remote Bridge visual mockup.
+- Added an inline HA Remote Bridge bridge/network brand mark and browser favicon, plus a reusable `icon.svg` branding asset in the App source tree.
+- Added text filtering for both discovered ESPHome devices and configured resources.
+- Added IPv4/IPv6 filtering for discovered ESPHome devices.
+- Added ESPHome/HTTP/HTTPS filtering for configured resources.
+- Added a collapsible `Discovered ESPHome devices` panel.
+- Added a single Refresh action for configured resources and discovery results.
+- Moved manual Add Resource into a compact expandable form.
+- Preserves `resource_type: esphome` and a discovery key when a discovered ESPHome device is added, so later filtering and profile-specific behavior can identify it reliably.
+- Keeps session tabs, Back/Forward/Reload navigation, Edit/Delete actions, mDNS discovery, ESPHome SSE support, MyIP companion proxying, and OPNsense compatibility behavior intact.
+
 ## 0.1.14
 
 - Added standalone passive ESPHome discovery directly in the App; the Home Assistant integration is not required.

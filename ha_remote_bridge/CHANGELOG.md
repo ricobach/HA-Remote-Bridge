@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.5
+
+- Improved VNC responsiveness by keeping the remote framebuffer size stable and scaling locally in noVNC instead of continuously requesting remote desktop resizes.
+- Tuned noVNC for lower-latency interactive use with quality level 5 and compression level 1.
+- Enabled TCP `TCP_NODELAY` on the App-to-VNC connection to reduce latency for small keyboard and mouse messages.
+- Increased VNC read batching to reduce proxy overhead on framebuffer updates.
+- Added explicit keyboard focus handling on pointer/touch interaction, reconnect, and when returning to the VNC page.
+- Added a compact VNC toolbar with a `Keyboard` focus button and `Ctrl-Alt-Del` action.
+- Added a visible keyboard-focus status indicator so it is clear whether keyboard input is being sent to the remote desktop.
+- Changed noVNC asset caching to `no-cache` revalidation to avoid stale mixed-version ES modules after App upgrades.
+
 ## 0.2.4
 
 - Added first-class VNC resources with Session Name, Group / Host, Host / IP, Port, and View Only settings.

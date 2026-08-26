@@ -17,7 +17,7 @@ import ssh_persistence  # noqa: F401  # replaces ssh.TTYD with tmux-backed manag
 import vnc_support as vnc
 from ui_shell_v10 import INDEX_HTML
 
-BRIDGE_UI_VERSION = "0.2.4"
+BRIDGE_UI_VERSION = "0.2.5"
 
 
 def _group_name_from_payload(payload: dict) -> str | None:

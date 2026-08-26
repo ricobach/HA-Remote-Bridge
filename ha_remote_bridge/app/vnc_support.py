@@ -7,6 +7,7 @@ import base64
 import html
 import mimetypes
 import os
+import socket
 from pathlib import Path
 
 from aiohttp import WSMsgType, web
@@ -96,7 +97,8 @@ async def novnc_asset(request: web.Request) -> web.StreamResponse:
     response = web.FileResponse(candidate)
     if content_type:
         response.content_type = content_type
-    response.headers["Cache-Control"] = "public, max-age=86400"
+    # noVNC recommends revalidation so updated HTML and ES modules cannot get out of sync.
+    response.headers["Cache-Control"] = "no-cache"
     return response
 
 
@@ -114,20 +116,33 @@ async def vnc_page(request: web.Request) -> web.Response:
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>{session_name}</title>
 <style>
-html,body,#screen{{width:100%;height:100%;margin:0;background:#111;overflow:hidden;font-family:Roboto,system-ui,sans-serif}}
-#screen{{display:flex;align-items:center;justify-content:center}}
-#status{{position:fixed;left:12px;top:12px;z-index:20;background:#172027dd;color:#fff;padding:7px 10px;border-radius:6px;font-size:12px;box-shadow:0 2px 8px #0005}}
+html,body{{width:100%;height:100%;margin:0;background:#111;overflow:hidden;font-family:Roboto,system-ui,sans-serif}}
+body{{display:flex;flex-direction:column}}
+#toolbar{{height:38px;flex:0 0 38px;display:flex;align-items:center;gap:7px;padding:0 9px;background:#20272d;color:#fff;border-bottom:1px solid #39434b;box-sizing:border-box}}
+#toolbar button{{height:27px;border:1px solid #59646d;border-radius:5px;padding:0 9px;background:#303a42;color:#fff;cursor:pointer;font:inherit;font-size:11px}}
+#toolbar button:hover{{background:#3c4851}}
+#toolbar .spacer{{flex:1}}
+#focus-state{{font-size:10px;color:#aeb8bf;white-space:nowrap}}
+#screen{{min-width:0;min-height:0;flex:1;display:flex;align-items:center;justify-content:center;outline:none;position:relative}}
+#screen:focus-within{{box-shadow:inset 0 0 0 2px #03a9f4}}
+#status{{position:fixed;left:12px;top:50px;z-index:20;background:#172027dd;color:#fff;padding:7px 10px;border-radius:6px;font-size:12px;box-shadow:0 2px 8px #0005}}
 #credentials{{display:none;position:fixed;inset:0;z-index:30;background:#0008;align-items:center;justify-content:center}}
 #credentials.open{{display:flex}}
 .card{{width:min(360px,calc(100vw - 30px));background:#fff;color:#222;border-radius:10px;padding:18px;box-shadow:0 18px 60px #0008}}
 .card h2{{margin:0 0 4px;font-size:18px}} .card p{{margin:0 0 14px;color:#666;font-size:12px}}
 .card input{{width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid #ccc;border-radius:5px;font:inherit}}
 .actions{{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}}
-button{{border:1px solid #ccc;border-radius:5px;padding:8px 12px;background:#fff;cursor:pointer}} button.primary{{background:#03a9f4;border-color:#03a9f4;color:#fff}}
+.card button{{border:1px solid #ccc;border-radius:5px;padding:8px 12px;background:#fff;cursor:pointer}} .card button.primary{{background:#03a9f4;border-color:#03a9f4;color:#fff}}
 </style>
 </head>
 <body>
-<div id="screen"></div>
+<div id="toolbar">
+  <button id="focus-keyboard" type="button" title="Send keyboard input to the remote desktop">⌨ Keyboard</button>
+  <button id="ctrl-alt-del" type="button" title="Send Ctrl-Alt-Delete">Ctrl-Alt-Del</button>
+  <div class="spacer"></div>
+  <span id="focus-state">Click the desktop to capture keyboard</span>
+</div>
+<div id="screen" tabindex="0"></div>
 <div id="status">Connecting to {target_host}:{target_port}…</div>
 <div id="credentials"><form id="credentials-form" class="card"><h2>VNC password</h2><p>This password is sent only to the active VNC server and is not stored by HA Remote Bridge.</p><input id="password" type="password" autocomplete="current-password" autofocus><div class="actions"><button class="primary" type="submit">Connect</button></div></form></div>
 <script type="module">
@@ -137,17 +152,43 @@ const screen = document.getElementById('screen');
 const status = document.getElementById('status');
 const credentials = document.getElementById('credentials');
 const password = document.getElementById('password');
+const focusState = document.getElementById('focus-state');
 const ws = new URL('websockify', window.location.href);
 ws.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-let rfb = new RFB(screen, ws.href);
+let rfb = new RFB(screen, ws.href, {{shared:true}});
+
+// Prefer responsiveness over maximum image quality. Keep the remote framebuffer size
+// stable and scale it locally; remote resize requests can be expensive on many servers.
 rfb.scaleViewport = true;
-rfb.resizeSession = true;
+rfb.resizeSession = false;
+rfb.clipViewport = false;
+rfb.qualityLevel = 5;
+rfb.compressionLevel = 1;
+rfb.focusOnClick = true;
 rfb.viewOnly = {view_only};
-rfb.addEventListener('connect', () => {{ status.textContent = 'Connected'; setTimeout(() => status.style.display='none', 1200); }});
-rfb.addEventListener('disconnect', e => {{ status.style.display='block'; status.textContent = e.detail.clean ? 'Disconnected' : 'Connection lost'; }});
+
+function focusRemote() {{
+  try {{ screen.focus({{preventScroll:true}}); }} catch (_) {{ screen.focus(); }}
+  try {{ rfb.focus({{preventScroll:true}}); }} catch (_) {{ rfb.focus(); }}
+  focusState.textContent = rfb.viewOnly ? 'View only' : 'Keyboard active';
+}}
+
+screen.addEventListener('pointerdown', focusRemote, {{passive:true}});
+screen.addEventListener('touchstart', focusRemote, {{passive:true}});
+document.getElementById('focus-keyboard').addEventListener('click', focusRemote);
+document.getElementById('ctrl-alt-del').addEventListener('click', () => {{ focusRemote(); rfb.sendCtrlAltDel(); }});
+window.addEventListener('focus', () => {{ if (!rfb.viewOnly) focusRemote(); }});
+document.addEventListener('visibilitychange', () => {{ if (!document.hidden && !rfb.viewOnly) setTimeout(focusRemote, 0); }});
+
+rfb.addEventListener('connect', () => {{
+  status.textContent = 'Connected';
+  setTimeout(() => status.style.display='none', 900);
+  if (!rfb.viewOnly) setTimeout(focusRemote, 0);
+}});
+rfb.addEventListener('disconnect', e => {{ status.style.display='block'; status.textContent = e.detail.clean ? 'Disconnected' : 'Connection lost'; focusState.textContent='Disconnected'; }});
 rfb.addEventListener('credentialsrequired', () => {{ credentials.classList.add('open'); password.focus(); }});
 rfb.addEventListener('securityfailure', e => {{ status.style.display='block'; status.textContent = e.detail.reason || 'VNC authentication failed'; }});
-document.getElementById('credentials-form').addEventListener('submit', e => {{ e.preventDefault(); rfb.sendCredentials({{password:password.value}}); password.value=''; credentials.classList.remove('open'); }});
+document.getElementById('credentials-form').addEventListener('submit', e => {{ e.preventDefault(); rfb.sendCredentials({{password:password.value}}); password.value=''; credentials.classList.remove('open'); setTimeout(focusRemote, 0); }});
 </script>
 </body>
 </html>'''
@@ -165,14 +206,23 @@ async def vnc_websocket(request: web.Request) -> web.WebSocketResponse:
     except (asyncio.TimeoutError, OSError) as err:
         raise web.HTTPBadGateway(text=f"Unable to connect to VNC server: {err}") from err
 
+    # Avoid Nagle delays for small keyboard/mouse RFB messages.
+    raw_socket = writer.get_extra_info("socket")
+    if raw_socket is not None:
+        try:
+            raw_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except OSError:
+            pass
+
     browser_ws = web.WebSocketResponse(protocols=("binary", "base64"), max_msg_size=0, heartbeat=30)
     await browser_ws.prepare(request)
     use_base64 = browser_ws.ws_protocol == "base64"
     main.LOGGER.info(
-        "VNC session opened for %s -> %s:%s",
+        "VNC session opened for %s -> %s:%s (protocol=%s)",
         resource.get("name", resource["id"]),
         resource["vnc_host"],
         resource.get("vnc_port", 5900),
+        browser_ws.ws_protocol or "binary",
     )
 
     async def browser_to_vnc() -> None:
@@ -189,7 +239,7 @@ async def vnc_websocket(request: web.Request) -> web.WebSocketResponse:
 
     async def vnc_to_browser() -> None:
         while not browser_ws.closed:
-            data = await reader.read(64 * 1024)
+            data = await reader.read(256 * 1024)
             if not data:
                 break
             if use_base64:

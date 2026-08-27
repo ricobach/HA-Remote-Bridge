@@ -11,7 +11,8 @@ RUN apk add --no-cache \
     openssh-keygen \
     ttyd \
     tmux \
-    novnc
+    novnc \
+    samba-client
 
 COPY run.sh /run.sh
 COPY app /app

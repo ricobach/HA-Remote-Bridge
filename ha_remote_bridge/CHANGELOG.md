@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.2
+
+- Added an inline ZIP browser for SMB `.zip` files.
+- ZIP archives open as navigable folder/file listings instead of falling back directly to download.
+- Added nested ZIP-folder navigation with Up and Back behavior that returns to the exact archive folder and then to the SMB directory containing the ZIP.
+- Supported ZIP entries can be previewed with the existing image, PDF, text/code, audio, and video viewers.
+- ZIP text entries keep the existing bounded 2 MB text-preview behavior.
+- Added safety limits for ZIP previews: at most 10,000 entries, 2 GB declared total uncompressed content, and 64 MB per individually previewed entry.
+- Rejects unsafe `..` archive paths and encrypted entries for inline preview.
+- ZIP browsing is read-only and does not extract archive contents into persistent App storage.
+
 ## 0.2.7
 
 - Hardened SMB browsing when used through Home Assistant Ingress and external reverse proxies.
@@ -215,7 +226,7 @@
 - Switched LAN target request forwarding to a small explicit header allowlist.
 - Prevents Home Assistant/Ingress-specific and oversized browser headers from being sent to embedded web servers such as ESPHome.
 - Preserves target-specific cookies plus rewritten `Origin`/`Referer` so login and CSRF flows such as OPNsense continue to work.
-- Keeps the larger Ingress-facing header limits introduced in 0.1.2.
+- Keeps the larger Ingress-facing header limits from 0.1.2.
 
 ## 0.1.2
 

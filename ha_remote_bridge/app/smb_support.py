@@ -197,7 +197,26 @@ def _auth_file(credential: dict | None) -> str | None:
         raise
 
 
-async def _run_smbclient(resource: dict, extra: list[str], timeout: float = 20) -> str:
+async def _precheck(resource: dict, timeout: float = 2.0) -> None:
+    """Fail quickly before spawning smbclient if the configured SMB port is unreachable."""
+    try:
+        _reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(resource["smb_host"], int(resource.get("smb_port", 445))),
+            timeout=timeout,
+        )
+    except asyncio.TimeoutError as err:
+        raise web.HTTPGatewayTimeout(text="SMB server did not answer on the configured port") from err
+    except OSError as err:
+        raise web.HTTPBadGateway(text=f"Unable to connect to SMB server: {err}") from err
+    writer.close()
+    try:
+        await writer.wait_closed()
+    except OSError:
+        pass
+
+
+async def _run_smbclient(resource: dict, extra: list[str], timeout: float = 8) -> str:
+    await _precheck(resource)
     credential = VAULT.get(resource.get("smb_credential_id"))
     auth_path = _auth_file(credential)
     command = [
@@ -205,13 +224,14 @@ async def _run_smbclient(resource: dict, extra: list[str], timeout: float = 20) 
         "-g",
         "-m", "SMB3",
         "-p", str(resource.get("smb_port", 445)),
-        "-t", "12",
+        "-t", "5",
     ]
     if auth_path:
         command += ["-A", auth_path]
     else:
         command += ["-N"]
     command += extra
+    process: asyncio.subprocess.Process | None = None
     try:
         process = await asyncio.create_subprocess_exec(
             *command,
@@ -220,15 +240,23 @@ async def _run_smbclient(resource: dict, extra: list[str], timeout: float = 20) 
         )
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as err:
             process.kill()
             await process.wait()
-            raise web.HTTPGatewayTimeout(text="SMB request timed out")
+            raise web.HTTPGatewayTimeout(text="SMB server took too long to respond") from err
+        except asyncio.CancelledError:
+            if process.returncode is None:
+                process.kill()
+                await process.wait()
+            raise
         if process.returncode != 0:
             message = stderr.decode(errors="replace").strip() or stdout.decode(errors="replace").strip()
             raise web.HTTPBadGateway(text=(message or "SMB request failed")[:1000])
         return stdout.decode(errors="replace")
     finally:
+        if process is not None and process.returncode is None:
+            process.kill()
+            await process.wait()
         if auth_path:
             Path(auth_path).unlink(missing_ok=True)
 
@@ -263,7 +291,17 @@ async def delete_credential(request: web.Request) -> web.Response:
     return web.Response(status=204)
 
 
-async def list_shares(request: web.Request) -> web.Response:
+async def _json_error(handler, request: web.Request) -> web.Response:
+    try:
+        return await handler(request)
+    except web.HTTPException as err:
+        return web.json_response({"error": err.text or err.reason, "status": err.status}, status=err.status)
+    except Exception:
+        main.LOGGER.exception("Unexpected SMB browser error")
+        return web.json_response({"error": "Unexpected SMB browser error", "status": 500}, status=500)
+
+
+async def _list_shares_impl(request: web.Request) -> web.Response:
     resource = _resource(request)
     raw = await _run_smbclient(resource, ["-L", resource["smb_host"]])
     shares = []
@@ -277,6 +315,10 @@ async def list_shares(request: web.Request) -> web.Response:
         if kind in {"disk", "disk share"} and name and not name.endswith("$"):
             shares.append({"name": name, "comment": comment})
     return web.json_response(shares)
+
+
+async def list_shares(request: web.Request) -> web.Response:
+    return await _json_error(_list_shares_impl, request)
 
 
 def _parse_directory(raw: str) -> list[dict]:
@@ -300,7 +342,7 @@ def _parse_directory(raw: str) -> list[dict]:
     return items
 
 
-async def list_directory(request: web.Request) -> web.Response:
+async def _list_directory_impl(request: web.Request) -> web.Response:
     resource = _resource(request)
     share = _safe_share(request.query.get("share", ""))
     path = _safe_path(request.query.get("path", ""))
@@ -311,6 +353,10 @@ async def list_directory(request: web.Request) -> web.Response:
     extra += ["-c", "ls"]
     raw = await _run_smbclient(resource, extra)
     return web.json_response({"share": share, "path": path, "items": _parse_directory(raw)})
+
+
+async def list_directory(request: web.Request) -> web.Response:
+    return await _json_error(_list_directory_impl, request)
 
 
 def _quoted_smb_name(value: str) -> str:
@@ -333,7 +379,7 @@ async def download_file(request: web.Request) -> web.StreamResponse:
     if parent:
         extra += ["-D", parent]
     extra += ["-c", command]
-    await _run_smbclient(resource, extra, timeout=120)
+    await _run_smbclient(resource, extra, timeout=90)
     if not local_path.exists():
         raise web.HTTPBadGateway(text="SMB download did not produce a local file")
 
@@ -363,14 +409,9 @@ async def download_file(request: web.Request) -> web.StreamResponse:
 async def probe_smb_resource(resource: dict) -> dict:
     started = time.monotonic()
     try:
-        _reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(resource["smb_host"], int(resource.get("smb_port", 445))),
-            timeout=2,
-        )
-        writer.close()
-        await writer.wait_closed()
+        await _precheck(resource, timeout=2)
         return {"online": True, "status": None, "latency_ms": round((time.monotonic() - started) * 1000)}
-    except (OSError, asyncio.TimeoutError):
+    except web.HTTPException:
         return {"online": False, "status": None, "latency_ms": round((time.monotonic() - started) * 1000)}
 
 
@@ -380,7 +421,7 @@ SMB_PAGE = r'''<!doctype html>
 <style>
 :root{color-scheme:light dark;--bg:#f5f5f5;--surface:#fff;--text:#212121;--muted:#727272;--border:#ddd;--accent:#03a9f4}
 @media(prefers-color-scheme:dark){:root{--bg:#111;--surface:#1c1c1c;--text:#eee;--muted:#aaa;--border:#383838}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.bar{height:52px;display:flex;align-items:center;gap:8px;padding:0 14px;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0}.title{font-weight:600}.crumbs{flex:1;white-space:nowrap;overflow:auto;color:var(--muted)}button{border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:6px;padding:7px 10px;cursor:pointer}.wrap{padding:14px;max-width:1100px;margin:auto}.list{background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden}.row{display:grid;grid-template-columns:minmax(0,1fr) 110px 90px;gap:12px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border)}.row:last-child{border-bottom:0}.name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.name button{border:0;padding:0;background:transparent;color:var(--text);font:inherit;text-align:left}.meta{color:var(--muted);font-size:12px;text-align:right}.empty,.error{padding:24px;text-align:center;color:var(--muted)}.error{color:#d32f2f}.share{cursor:pointer}.icon{display:inline-block;width:24px} @media(max-width:600px){.row{grid-template-columns:minmax(0,1fr) 72px}.row .kind{display:none}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.bar{height:52px;display:flex;align-items:center;gap:8px;padding:0 14px;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0}.title{font-weight:600}.crumbs{flex:1;white-space:nowrap;overflow:auto;color:var(--muted)}button{border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:6px;padding:7px 10px;cursor:pointer}.wrap{padding:14px;max-width:1100px;margin:auto}.list{background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden}.row{display:grid;grid-template-columns:minmax(0,1fr) 110px 90px;gap:12px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border)}.row:last-child{border-bottom:0}.name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.name button{border:0;padding:0;background:transparent;color:var(--text);font:inherit;text-align:left}.meta{color:var(--muted);font-size:12px;text-align:right}.empty,.error{padding:24px;text-align:center;color:var(--muted)}.error{color:#d32f2f;white-space:pre-wrap}.share{cursor:pointer}.icon{display:inline-block;width:24px} @media(max-width:600px){.row{grid-template-columns:minmax(0,1fr) 72px}.row .kind{display:none}}
 </style></head>
 <body><div class="bar"><button id="up" type="button">← Up</button><div class="title">SMB Browser</div><div id="crumbs" class="crumbs"></div><button id="refresh" type="button">↻</button></div><div class="wrap"><div id="content" class="list"><div class="empty">Loading…</div></div></div>
 <script>
@@ -389,7 +430,8 @@ function api(rel){return '../../api/smb/'+resourceId+'/'+rel;}
 function human(n){if(n==null)return'';const u=['B','KB','MB','GB','TB'];let i=0,v=Number(n);while(v>=1024&&i<u.length-1){v/=1024;i++;}return (i?v.toFixed(v<10?1:0):v)+' '+u[i];}
 function setError(t){$('content').innerHTML='<div class="error"></div>';$('content').firstChild.textContent=t;}
 function crumbs(){const bits=[];if(share)bits.push(share);if(path)bits.push(...path.split('/'));$('crumbs').textContent=bits.length?bits.join(' / '):'Shares';$('up').disabled=!share;}
-async function load(){crumbs();$('content').innerHTML='<div class="empty">Loading…</div>';try{if(!share){const r=await fetch(api('shares'));if(!r.ok)throw new Error(await r.text());const data=await r.json();renderShares(data);}else{const r=await fetch(api('list?share='+enc(share)+'&path='+enc(path)));if(!r.ok)throw new Error(await r.text());const data=await r.json();renderItems(data.items||[]);}}catch(e){setError(e.message||String(e));}}
+async function fetchJSON(url){const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),12000);try{const r=await fetch(url,{cache:'no-store',signal:controller.signal});const type=(r.headers.get('content-type')||'').toLowerCase();if(type.includes('application/json')){const data=await r.json();if(!r.ok)throw new Error(data.error||('SMB request failed ('+r.status+')'));return data;}const text=await r.text();if(!r.ok){if(/<html|<!doctype/i.test(text))throw new Error('Remote access proxy returned HTTP '+r.status+'. Try again; if it repeats, test from the local Home Assistant URL.');throw new Error(text.slice(0,500)||('SMB request failed ('+r.status+')'));}throw new Error('SMB browser received an unexpected non-JSON response.');}catch(e){if(e.name==='AbortError')throw new Error('SMB request timed out before the remote-access proxy responded.');throw e;}finally{clearTimeout(timer);}}
+async function load(){crumbs();$('content').innerHTML='<div class="empty">Loading…</div>';try{if(!share){const data=await fetchJSON(api('shares'));renderShares(data);}else{const data=await fetchJSON(api('list?share='+enc(share)+'&path='+enc(path)));renderItems(data.items||[]);}}catch(e){setError(e.message||String(e));}}
 function renderShares(items){$('content').innerHTML='';if(!items.length){$('content').innerHTML='<div class="empty">No disk shares found.</div>';return;}for(const s of items){const row=document.createElement('div');row.className='row share';const name=document.createElement('div');name.className='name';name.innerHTML='<span class="icon">🗄️</span>';const b=document.createElement('button');b.textContent=s.name;b.onclick=()=>{share=s.name;path='';load();};name.append(b);const comment=document.createElement('div');comment.className='meta kind';comment.textContent=s.comment||'';const action=document.createElement('div');action.className='meta';action.textContent='Open';row.append(name,comment,action);$('content').append(row);}}
 function renderItems(items){$('content').innerHTML='';if(!items.length){$('content').innerHTML='<div class="empty">This folder is empty.</div>';return;}for(const item of items){const row=document.createElement('div');row.className='row';const name=document.createElement('div');name.className='name';name.innerHTML='<span class="icon">'+(item.directory?'📁':'📄')+'</span>';const b=document.createElement('button');b.textContent=item.name;if(item.directory)b.onclick=()=>{path=[path,item.name].filter(Boolean).join('/');load();};else b.onclick=()=>{location.href=api('download?share='+enc(share)+'&path='+enc([path,item.name].filter(Boolean).join('/')));};name.append(b);const kind=document.createElement('div');kind.className='meta kind';kind.textContent=item.directory?'Folder':'File';const size=document.createElement('div');size.className='meta';size.textContent=item.directory?'':human(item.size);row.append(name,kind,size);$('content').append(row);}}
 $('up').onclick=()=>{if(path){const p=path.split('/');p.pop();path=p.join('/');}else share='';load();};$('refresh').onclick=load;load();

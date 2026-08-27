@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.7
+
+- Hardened SMB browsing when used through Home Assistant Ingress and external reverse proxies.
+- Added a short SMB TCP precheck before starting `smbclient`, so unreachable hosts fail quickly instead of holding the ingress request open.
+- Reduced Samba client timeouts for share and directory discovery and made subprocess cancellation kill the underlying `smbclient` process cleanly.
+- SMB share/list API failures now return compact JSON errors instead of raw HTML or long text responses.
+- The SMB browser now detects reverse-proxy HTML errors such as Cloudflare 502 pages and shows a concise diagnostic instead of rendering the entire error document.
+- Added a browser-side 12-second timeout for SMB list operations so stale ingress requests do not hang indefinitely.
+- Corrected the runtime version banner to report the current release.
+
 ## 0.2.6
 
 - Added first-class SMB resources with Session Name, Group / Host, Host / IP, Port, and reusable credential selection.

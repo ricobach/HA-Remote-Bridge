@@ -1,10 +1,9 @@
-"""Inline ZIP browsing for SMB files in HA Remote Bridge 0.3.2."""
+"""Inline ZIP browsing for SMB files in HA Remote Bridge 0.3.3."""
 
 from __future__ import annotations
 
 import asyncio
 import html
-import io
 import mimetypes
 import zipfile
 from pathlib import PurePosixPath
@@ -12,13 +11,20 @@ from urllib.parse import quote
 
 from aiohttp import web
 
+import smb_support_v4 as preview
 import smb_support_v5 as previous
 
 base = previous.base
 MAX_ZIP_ENTRIES = 10_000
 MAX_ZIP_TOTAL_UNCOMPRESSED = 2 * 1024 * 1024 * 1024
 MAX_ZIP_ENTRY_PREVIEW = 64 * 1024 * 1024
-MAX_ZIP_TEXT_PREVIEW = previous.TEXT_PREVIEW_LIMIT
+MAX_ZIP_TEXT_PREVIEW = preview.TEXT_PREVIEW_LIMIT
+
+# Fail at import time with a clear local error if the preview-layer contract
+# changes in a future release instead of crashing later on the first ZIP open.
+for _required in ("_fetch_to_temp", "_preview_kind", "VIEW_PAGE", "TEXT_PREVIEW_LIMIT"):
+    if not hasattr(preview, _required):
+        raise RuntimeError(f"ZIP preview dependency is missing preview.{_required}")
 
 
 def _safe_entry_name(value: str) -> str:
@@ -63,7 +69,7 @@ async def _open_zip_from_smb(request: web.Request) -> tuple[dict, str, str, obje
     full_path = base._safe_path(request.query.get("path", ""))
     if not full_path:
         raise web.HTTPBadRequest(text="A ZIP file path is required")
-    local_path, filename = await previous._fetch_to_temp(resource, share, full_path, timeout=180)
+    local_path, _filename = await preview._fetch_to_temp(resource, share, full_path, timeout=180)
     try:
         zf = zipfile.ZipFile(local_path, "r")
         _validate_archive(zf)
@@ -193,11 +199,11 @@ document.getElementById('up').onclick=()=>{if(!folder)return;const p=folder.spli
 </script></body></html>'''
 
 
-ZIP_ENTRY_PAGE = previous.VIEW_PAGE
+ZIP_ENTRY_PAGE = preview.VIEW_PAGE
 
 
 def _entry_kind(entry: str) -> tuple[str, str]:
-    return previous._preview_kind(entry.rpartition("/")[2])
+    return preview._preview_kind(entry.rpartition("/")[2])
 
 
 async def viewer_page(request: web.Request) -> web.Response:
@@ -239,17 +245,33 @@ async def zip_entry_page(request: web.Request) -> web.Response:
     text_url = f"../../api/smb/{rid}/zip/text?share={q_share}&path={q_path}&entry={q_entry}"
     back_url = f"view?share={q_share}&path={q_path}" + (f"&folder={quote(folder, safe='')}" if folder else "")
     filename = entry.rpartition("/")[2]
-    if kind == "image": viewer = f'<img src="{html.escape(raw_url, quote=True)}" alt="">'
-    elif kind == "pdf": viewer = f'<iframe src="{html.escape(raw_url, quote=True)}" title="PDF preview"></iframe>'
-    elif kind == "audio": viewer = f'<audio controls autoplay src="{html.escape(raw_url, quote=True)}"></audio>'
-    elif kind == "video": viewer = f'<video controls playsinline src="{html.escape(raw_url, quote=True)}"></video>'
-    elif kind == "text": viewer = ""
-    else: viewer = '<div class="unknown"><h2>No inline preview</h2><p>This ZIP entry type is not supported by the built-in viewer.</p></div>'
-    page = ZIP_ENTRY_PAGE.replace("const back=document.getElementById('back');back.onclick=()=>history.length>1?history.back():location.replace('__BROWSER__');", "const back=document.getElementById('back');back.onclick=()=>location.replace('__BROWSER__');", 1)
+    if kind == "image":
+        viewer = f'<img src="{html.escape(raw_url, quote=True)}" alt="">'
+    elif kind == "pdf":
+        viewer = f'<iframe src="{html.escape(raw_url, quote=True)}" title="PDF preview"></iframe>'
+    elif kind == "audio":
+        viewer = f'<audio controls autoplay src="{html.escape(raw_url, quote=True)}"></audio>'
+    elif kind == "video":
+        viewer = f'<video controls playsinline src="{html.escape(raw_url, quote=True)}"></video>'
+    elif kind == "text":
+        viewer = ""
+    else:
+        viewer = '<div class="unknown"><h2>No inline preview</h2><p>This ZIP entry type is not supported by the built-in viewer.</p></div>'
+    page = ZIP_ENTRY_PAGE.replace(
+        "const back=document.getElementById('back');back.onclick=()=>history.length>1?history.back():location.replace('__BROWSER__');",
+        "const back=document.getElementById('back');back.onclick=()=>location.replace('__BROWSER__');",
+        1,
+    )
     for key, value in {
-        "__NAME__": html.escape(filename), "__MIME__": html.escape(mime), "__VIEWER__": viewer,
-        "__KIND__": kind, "__TEXT_API__": text_url, "__DOWNLOAD__": raw_url, "__BROWSER__": back_url,
-    }.items(): page = page.replace(key, value)
+        "__NAME__": html.escape(filename),
+        "__MIME__": html.escape(mime),
+        "__VIEWER__": viewer,
+        "__KIND__": kind,
+        "__TEXT_API__": text_url,
+        "__DOWNLOAD__": raw_url,
+        "__BROWSER__": back_url,
+    }.items():
+        page = page.replace(key, value)
     return web.Response(text=page, content_type="text/html", headers={"Cache-Control": "no-store"})
 
 

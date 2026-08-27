@@ -1,7 +1,7 @@
 name: HA Remote Bridge
-version: "0.2.5"
+version: "0.2.6"
 slug: ha_remote_bridge
-description: Securely access selected local HTTP/HTTPS, SSH and VNC resources through Home Assistant Ingress.
+description: Securely access selected local HTTP/HTTPS, SSH, VNC and SMB resources through Home Assistant Ingress.
 url: https://github.com/ricobach/HA-Remote-Bridge
 arch:
   - amd64

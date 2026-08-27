@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.6
+
+- Added first-class SMB resources with Session Name, Group / Host, Host / IP, Port, and reusable credential selection.
+- Added an SMB file browser inside the normal session-tab UI with share discovery, folder navigation, file-size display, refresh/up navigation, and file downloads.
+- Added reusable SMB credential profiles with friendly name, username, password, and optional domain/workgroup.
+- SMB passwords are stored only in the App-local `/data/smb` vault with restrictive permissions and are omitted from API responses and normal resource definitions.
+- Samba receives saved credentials through short-lived mode-0600 authentication files rather than command-line password arguments.
+- Added Guest / anonymous SMB mode for shares that do not require authentication.
+- Added SMB Online/Offline checks using the configured TCP port (default 445).
+- Added SMB filtering and host grouping alongside Web, SSH, and VNC endpoints.
+- SMB browsing is constrained to configured SMB resources; HA Remote Bridge does not expose a generic SMB mount or arbitrary TCP tunnel.
+- Added the Alpine `samba-client` package to the App image.
+
 ## 0.2.5
 
 - Improved VNC responsiveness by keeping the remote framebuffer size stable and scaling locally in noVNC instead of continuously requesting remote desktop resizes.

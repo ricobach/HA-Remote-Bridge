@@ -1,4 +1,4 @@
-"""Modern HA Remote Bridge runtime with Web, SSH and VNC support."""
+"""Modern HA Remote Bridge runtime with Web, SSH, VNC and SMB support."""
 
 from __future__ import annotations
 
@@ -12,12 +12,13 @@ from aiohttp import ClientError, ClientTimeout, web
 import compat_runner as compat
 import launcher
 import main
+import smb_support as smb
 import ssh_support as ssh
 import ssh_persistence  # noqa: F401  # replaces ssh.TTYD with tmux-backed manager
 import vnc_support as vnc
-from ui_shell_v10 import INDEX_HTML
+from ui_shell_v11 import INDEX_HTML
 
-BRIDGE_UI_VERSION = "0.2.5"
+BRIDGE_UI_VERSION = "0.2.6"
 
 
 def _group_name_from_payload(payload: dict) -> str | None:
@@ -67,6 +68,19 @@ async def add_resource(request: web.Request) -> web.Response:
             "vnc_host": host,
             "vnc_port": port,
             "vnc_view_only": view_only,
+        }
+    elif resource_type == "smb":
+        await smb.VAULT.load()
+        name, host, port, credential_id = smb.validate_smb_payload(payload)
+        resource = {
+            "id": secrets.token_hex(8),
+            "name": name,
+            "url": smb.smb_resource_url(host, port),
+            "verify_ssl": False,
+            "resource_type": "smb",
+            "smb_host": host,
+            "smb_port": port,
+            "smb_credential_id": credential_id,
         }
     else:
         name, url, verify_ssl = main.validate_resource_payload(payload)
@@ -121,6 +135,18 @@ async def update_resource(request: web.Request) -> web.Response:
             "vnc_port": port,
             "vnc_view_only": view_only,
         })
+    elif current_type == "smb" or payload_type == "smb":
+        await smb.VAULT.load()
+        name, host, port, credential_id = smb.validate_smb_payload(payload)
+        resource.update({
+            "name": name,
+            "url": smb.smb_resource_url(host, port),
+            "verify_ssl": False,
+            "resource_type": "smb",
+            "smb_host": host,
+            "smb_port": port,
+            "smb_credential_id": credential_id,
+        })
     else:
         name, url, verify_ssl = main.validate_resource_payload(payload)
         resource.update({"name": name, "url": url, "verify_ssl": verify_ssl})
@@ -160,6 +186,8 @@ async def _probe_resource(resource: dict) -> tuple[str, dict]:
         return resource_id, await ssh.probe_ssh_resource(resource)
     if resource.get("resource_type") == "vnc":
         return resource_id, await vnc.probe_vnc_resource(resource)
+    if resource.get("resource_type") == "smb":
+        return resource_id, await smb.probe_smb_resource(resource)
 
     started = time.monotonic()
     if main.CLIENT is None:
@@ -194,6 +222,7 @@ main.INDEX_HTML = INDEX_HTML
 
 async def _run() -> None:
     await ssh.VAULT.load()
+    await smb.VAULT.load()
     app = launcher.create_app()
     app.router.add_get("/api/discovery/esphome", compat.list_discovered_esphome)
     app.router.add_get("/api/resources/status", resource_status)
@@ -206,6 +235,13 @@ async def _run() -> None:
     app.router.add_get("/novnc-assets/{tail:.*}", vnc.novnc_asset)
     app.router.add_get("/vnc/{resource_id}/", vnc.vnc_page)
     app.router.add_get("/vnc/{resource_id}/websockify", vnc.vnc_websocket)
+    app.router.add_get("/api/smb/credentials", smb.list_credentials)
+    app.router.add_post("/api/smb/credentials", smb.add_credential)
+    app.router.add_delete("/api/smb/credentials/{credential_id}", smb.delete_credential)
+    app.router.add_get("/api/smb/{resource_id}/shares", smb.list_shares)
+    app.router.add_get("/api/smb/{resource_id}/list", smb.list_directory)
+    app.router.add_get("/api/smb/{resource_id}/download", smb.download_file)
+    app.router.add_get("/smb/{resource_id}/", smb.smb_page)
 
     runner = web.AppRunner(app, access_log=main.LOGGER, max_line_size=64 * 1024, max_field_size=64 * 1024, max_headers=128 * 1024)
     try:
@@ -217,7 +253,7 @@ async def _run() -> None:
     await runner.setup()
     site = web.TCPSite(runner, host="0.0.0.0", port=main.PORT)
     await site.start()
-    main.LOGGER.info("Modern dashboard %s active (Web + SSH + VNC)", BRIDGE_UI_VERSION)
+    main.LOGGER.info("Modern dashboard %s active (Web + SSH + VNC + SMB)", BRIDGE_UI_VERSION)
     try:
         await asyncio.Event().wait()
     finally:

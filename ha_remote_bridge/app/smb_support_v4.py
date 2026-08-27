@@ -167,7 +167,7 @@ async def viewer_page(request: web.Request) -> web.Response:
     raw_url = f"../../api/smb/{rid}/raw?share={q_share}&path={q_path}"
     text_url = f"../../api/smb/{rid}/text?share={q_share}&path={q_path}"
     download_url = f"../../api/smb/{rid}/download?share={q_share}&path={q_path}"
-    browser_url = f"./"
+    browser_url = "./"
 
     if kind == "image":
         viewer = f'<img src="{html.escape(raw_url, quote=True)}" alt="">'
@@ -201,12 +201,18 @@ async def viewer_page(request: web.Request) -> web.Response:
 # separate Download action remains available.
 SMB_PAGE = base.SMB_PAGE
 old = "const size=document.createElement('div');size.className='meta';size.textContent=item.directory?'':human(item.size);row.append(name,kind,size);$('content').append(row);"
+old_click = "else b.onclick=()=>{location.href=api('download?share='+enc(share)+'&path='+enc([path,item.name].filter(Boolean).join('/')));};"
+if old not in SMB_PAGE or old_click not in SMB_PAGE:
+    raise RuntimeError("SMB viewer composition failed: browser file-row markup changed")
 new = "const size=document.createElement('div');size.className='meta';if(item.directory){size.textContent='';}else{const dl=document.createElement('a');dl.href=api('download?share='+enc(share)+'&path='+enc([path,item.name].filter(Boolean).join('/')));dl.textContent='Download';dl.style.color='var(--accent)';dl.style.textDecoration='none';size.append(dl);}row.append(name,kind,size);$('content').append(row);"
-SMB_PAGE = SMB_PAGE.replace(old, new)
+SMB_PAGE = SMB_PAGE.replace(old, new, 1)
 SMB_PAGE = SMB_PAGE.replace(
-    "else b.onclick=()=>{location.href=api('download?share='+enc(share)+'&path='+enc([path,item.name].filter(Boolean).join('/')));};",
+    old_click,
     "else b.onclick=()=>{location.href='view?share='+enc(share)+'&path='+enc([path,item.name].filter(Boolean).join('/'));};",
+    1,
 )
+if "location.href='view?share='" not in SMB_PAGE or "dl.textContent='Download'" not in SMB_PAGE:
+    raise RuntimeError("SMB viewer composition failed: preview actions missing")
 
 
 async def smb_page(request: web.Request) -> web.Response:

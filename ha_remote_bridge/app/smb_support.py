@@ -6,7 +6,6 @@ import asyncio
 import json
 import os
 import secrets
-import socket
 import tempfile
 import time
 from pathlib import Path, PurePosixPath
@@ -155,14 +154,16 @@ def smb_resource_url(host: str, port: int) -> str:
 
 def _safe_share(value: str) -> str:
     value = value.strip()
-    if not value or len(value) > 255 or any(ch in value for ch in "/\\;\r\n\t\"'):
+    forbidden = {'/', '\\', ';', '\r', '\n', '\t', '"', "'"}
+    if not value or len(value) > 255 or any(ch in forbidden for ch in value):
         raise web.HTTPBadRequest(text="Invalid SMB share name")
     return value
 
 
 def _safe_path(value: str) -> str:
     value = value.replace("\\", "/").strip("/")
-    if len(value) > 4096 or any(ch in value for ch in ";\r\n\t\""):
+    forbidden = {';', '\r', '\n', '\t', '"'}
+    if len(value) > 4096 or any(ch in forbidden for ch in value):
         raise web.HTTPBadRequest(text="Invalid SMB path")
     parts = []
     for part in PurePosixPath("/" + value).parts:
@@ -188,7 +189,10 @@ def _auth_file(credential: dict | None) -> str | None:
                 handle.write(f"domain = {credential['domain']}\n")
         return path
     except Exception:
-        os.close(fd)
+        try:
+            os.close(fd)
+        except OSError:
+            pass
         Path(path).unlink(missing_ok=True)
         raise
 
@@ -310,8 +314,6 @@ async def list_directory(request: web.Request) -> web.Response:
 
 
 def _quoted_smb_name(value: str) -> str:
-    # smbclient's command parser supports double-quoted filenames. Reject the
-    # characters that could break out of that quoting context.
     if not value or any(ch in value for ch in '";\r\n'):
         raise web.HTTPBadRequest(text="This SMB filename cannot be downloaded safely")
     return f'"{value}"'

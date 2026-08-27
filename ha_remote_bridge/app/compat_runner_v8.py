@@ -1,4 +1,4 @@
-"""HA Remote Bridge 0.3.2 runtime wrapper with inline SMB ZIP browsing."""
+"""HA Remote Bridge 0.3.3 runtime wrapper with inline SMB ZIP browsing."""
 
 import asyncio
 
@@ -11,7 +11,7 @@ import smb_support_v6 as smb
 previous.smb = smb
 previous.previous.smb = smb
 previous.previous.previous.base.base.smb = smb
-previous.previous.previous.base.base.BRIDGE_UI_VERSION = "0.3.2"
+previous.previous.previous.base.base.BRIDGE_UI_VERSION = "0.3.3"
 main.INDEX_HTML = previous.previous.previous.base.INDEX_HTML
 
 # Add ZIP-specific APIs and the nested-entry viewer on top of the existing

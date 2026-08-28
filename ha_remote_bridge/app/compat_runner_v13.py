@@ -4,7 +4,6 @@ import asyncio
 
 import compat_runner_v12 as previous
 import compat_runner_v8 as zip_runtime
-import main
 import smb_support_v7 as smb
 
 # The SMB and ZIP routes were composed in the older runtime layers and resolve
@@ -16,8 +15,10 @@ zip_runtime.previous.smb = smb
 zip_runtime.previous.previous.smb = smb
 zip_runtime.previous.previous.previous.base.base.smb = smb
 
-# Keep the current 0.4.3 dashboard and all existing protocol behavior.
-previous.previous.previous.previous.previous.previous.previous.previous.base.base.BRIDGE_UI_VERSION = "0.4.4"
+# Importing the current dashboard runtime above has already installed the 0.4.3
+# UI shell. Reuse the stable base runner directly and only advance its banner.
+base_runtime = zip_runtime.previous.previous.previous.base.base
+base_runtime.BRIDGE_UI_VERSION = "0.4.4"
 
 if __name__ == "__main__":
-    asyncio.run(previous.previous.previous.previous.previous.previous.previous.previous.base.base._run())
+    asyncio.run(base_runtime._run())

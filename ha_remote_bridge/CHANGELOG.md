@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.3
+
+- Added collapsible service groups for host cards with more than one configured connection.
+- Multi-service cards show one primary connection by default with a compact `Show N more` expander.
+- Expanding a card reveals all services inline; `Hide services` collapses it again.
+- Expansion state is remembered per host in browser local storage.
+- Service priority is deterministic: ESPHome/Web first, then SSH, SMB, and VNC.
+- Protocol filters operate before collapsing, so a filter that leaves one matching service shows it directly without an unnecessary expander.
+
 ## 0.3.2
 
 - Added an inline ZIP browser for SMB `.zip` files.

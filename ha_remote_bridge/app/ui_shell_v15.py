@@ -4,6 +4,14 @@ from ui_shell_v14 import INDEX_HTML as BASE_INDEX_HTML
 
 INDEX_HTML = BASE_INDEX_HTML
 
+# With a dedicated ESPHome chip, keep the generic Web chip limited to ordinary
+# HTTP/HTTPS resources instead of showing ESPHome connections in both filters.
+INDEX_HTML = INDEX_HTML.replace(
+    "f==='web'&&(kind==='http'||kind==='https'||kind==='esphome')",
+    "f==='web'&&(kind==='http'||kind==='https')",
+    1,
+)
+
 SORT_FILTER_CSS = r'''
     /* 0.4.2: explicit ESPHome filtering and compact host sorting. */
     .compact-filter-row { align-items:center; }

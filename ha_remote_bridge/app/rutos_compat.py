@@ -71,11 +71,12 @@ def install() -> None:
         if resource_id not in _RUTOS_RESOURCES:
             return headers
 
+        target_path = _target_path(target)
         authorization = request.headers.get("Authorization")
         if authorization:
             _RUTOS_AUTHORIZATION[resource_id] = authorization
             headers["Authorization"] = authorization
-        elif _target_path(target) in _RUTOS_SUBSCRIPTION_PATHS:
+        elif target_path in _RUTOS_SUBSCRIPTION_PATHS:
             cached = _RUTOS_AUTHORIZATION.get(resource_id)
             if cached:
                 headers["Authorization"] = cached
@@ -84,7 +85,18 @@ def install() -> None:
                     resource_id,
                 )
 
-        if _target_path(target) == "/api/logout":
+        if target_path in _RUTOS_SUBSCRIPTION_PATHS:
+            # RutOS uses subscribe.lua as its long-lived UI update channel.
+            # Make this request match a direct browser connection closely and
+            # avoid intermediary compression/buffering of the event stream.
+            resource = main.STORE.get(resource_id)
+            headers["Accept"] = "text/event-stream"
+            headers["Accept-Encoding"] = "identity"
+            headers["Cache-Control"] = "no-cache"
+            if resource:
+                headers["Referer"] = resource["url"].rstrip("/") + "/"
+
+        if target_path == "/api/logout":
             _RUTOS_AUTHORIZATION.pop(resource_id, None)
 
         return headers
@@ -137,6 +149,37 @@ def install() -> None:
   history.replaceState = function(state, title, url) {{
     return nativeReplaceState(state, title, rewriteNavigation(url));
   }};
+
+  // Vue/RutOS creates some assets dynamically after the original HTML has
+  // loaded (for example /tlt_networks_logo.svg). Intercept root-relative DOM
+  // attributes before the browser gets a chance to request them from the HA
+  // host root.
+  const nativeSetAttribute = Element.prototype.setAttribute;
+  Element.prototype.setAttribute = function(name, value) {{
+    const attr = String(name || '').toLowerCase();
+    if (attr === 'src' || attr === 'href' || attr === 'action' || attr === 'poster') {{
+      value = rewriteNavigation(value);
+    }}
+    return nativeSetAttribute.call(this, name, value);
+  }};
+
+  const patchUrlProperty = (prototype, property) => {{
+    if (!prototype) return;
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, property);
+    if (!descriptor || !descriptor.set || !descriptor.get || descriptor.configurable === false) return;
+    try {{
+      Object.defineProperty(prototype, property, {{
+        configurable: descriptor.configurable,
+        enumerable: descriptor.enumerable,
+        get: descriptor.get,
+        set(value) {{ descriptor.set.call(this, rewriteNavigation(value)); }},
+      }});
+    }} catch (_) {{}}
+  }};
+  patchUrlProperty(window.HTMLImageElement && HTMLImageElement.prototype, 'src');
+  patchUrlProperty(window.HTMLScriptElement && HTMLScriptElement.prototype, 'src');
+  patchUrlProperty(window.HTMLLinkElement && HTMLLinkElement.prototype, 'href');
+  patchUrlProperty(window.HTMLFormElement && HTMLFormElement.prototype, 'action');
 
   document.addEventListener('click', (event) => {{
     const anchor = event.target && event.target.closest ? event.target.closest('a[href]') : null;

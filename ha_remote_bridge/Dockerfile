@@ -9,6 +9,7 @@ RUN apk add --no-cache \
     py3-zeroconf \
     openssh-client-default \
     openssh-keygen \
+    sshpass \
     ttyd \
     tmux \
     novnc \

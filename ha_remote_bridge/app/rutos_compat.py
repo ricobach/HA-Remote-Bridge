@@ -17,6 +17,7 @@ import main
 _RUTOS_RESOURCES: set[str] = set()
 _LOGGED_RESOURCES: set[str] = set()
 _RUTOS_AUTHORIZATION: dict[str, str] = {}
+_RUTOS_AUTH_BRIDGE_HEADER = "X-HA-Remote-Bridge-RutOS-Authorization"
 
 _RUTOS_PATH_PREFIXES = (
     "/api/unauthorized/",
@@ -72,21 +73,25 @@ def install() -> None:
             return headers
 
         target_path = _target_path(target)
-        authorization = request.headers.get("Authorization")
 
-        # Normal RutOS API calls use the application Bearer token. Keep this
-        # behavior for XHR/fetch traffic and remember the token in process
-        # memory only for diagnostics/session lifecycle purposes.
+        # The browser-side RutOS shim transports the router Bearer token in a
+        # dedicated bridge-only header. Home Assistant may consume or filter a
+        # normal Authorization header while processing Ingress, so reconstruct
+        # Authorization only on the App -> RutOS hop. Never forward the bridge
+        # header itself upstream.
+        bridged_authorization = request.headers.get(_RUTOS_AUTH_BRIDGE_HEADER)
+        direct_authorization = request.headers.get("Authorization")
+        authorization = bridged_authorization or direct_authorization
+        headers.pop(_RUTOS_AUTH_BRIDGE_HEADER, None)
+
         if authorization and target_path not in _RUTOS_SUBSCRIPTION_PATHS:
             _RUTOS_AUTHORIZATION[resource_id] = authorization
             headers["Authorization"] = authorization
 
         if target_path in _RUTOS_SUBSCRIPTION_PATHS:
-            # A native EventSource cannot set a custom Authorization header.
-            # RutOS therefore has to authenticate subscribe.lua from the normal
-            # same-origin browser/session context (cookie and/or query token).
-            # Do not inject the Bearer token here: that can cause uhttpd/CGI to
-            # reject an otherwise valid EventSource request with 403.
+            # Native EventSource cannot set a custom Authorization header.
+            # Preserve the normal RutOS cookie/query context and do not inject
+            # a Bearer token into subscribe.lua.
             headers.pop("Authorization", None)
             resource = main.STORE.get(resource_id)
             headers["Accept"] = "text/event-stream"
@@ -119,29 +124,76 @@ def install() -> None:
   const bridge = {json.dumps(bridge)};
   const ingressPrefix = {json.dumps(prefix)};
   const targetOrigin = {json.dumps(target_origin)};
+  const authBridgeHeader = {json.dumps(_RUTOS_AUTH_BRIDGE_HEADER)};
+
+  const isAlreadyBridged = (value) => {{
+    if (typeof value !== 'string') return false;
+    try {{
+      const u = new URL(value, window.location.href);
+      return u.origin === window.location.origin &&
+        (u.pathname === bridge || u.pathname.startsWith(bridge + '/'));
+    }} catch (_) {{
+      return false;
+    }}
+  }};
 
   const rewriteNavigation = (value) => {{
     if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//')) return value;
-    if (value === bridge || value.startsWith(bridge + '/')) return value;
+    if (isAlreadyBridged(value)) return value;
     if (ingressPrefix !== '/' && (value === ingressPrefix.slice(0, -1) || value.startsWith(ingressPrefix))) return value;
     return bridge + value;
   }};
 
-  const previousXhrOpen = XMLHttpRequest.prototype.open;
-  const normalizeXhrUrl = (value) => {{
+  // Convert an already-bridged browser URL back to the target origin before
+  // feeding it into the older generic proxy shim. That shim then applies the
+  // bridge exactly once instead of producing /proxy/id/<ingress>/proxy/id/.
+  const normalizeBridgedUrl = (value) => {{
     if (typeof value !== 'string') return value;
     try {{
       const u = new URL(value, window.location.href);
-      const sameBrowserOrigin = u.origin === window.location.origin;
-      if (sameBrowserOrigin && (u.pathname === bridge || u.pathname.startsWith(bridge + '/'))) {{
+      if (u.origin === window.location.origin &&
+          (u.pathname === bridge || u.pathname.startsWith(bridge + '/'))) {{
         const suffix = u.pathname.slice(bridge.length) || '/';
         return targetOrigin + suffix + u.search + u.hash;
       }}
     }} catch (_) {{}}
     return value;
   }};
+
+  const previousXhrOpen = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function(method, url, ...rest) {{
-    return previousXhrOpen.call(this, method, normalizeXhrUrl(url), ...rest);
+    return previousXhrOpen.call(this, method, normalizeBridgedUrl(url), ...rest);
+  }};
+
+  // Transport RutOS's Bearer token through Home Assistant Ingress using a
+  // bridge-only header. The server converts it back to Authorization only for
+  // this preconfigured RutOS resource.
+  const previousSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
+  XMLHttpRequest.prototype.setRequestHeader = function(name, value) {{
+    if (String(name || '').toLowerCase() === 'authorization') {{
+      return previousSetRequestHeader.call(this, authBridgeHeader, value);
+    }}
+    return previousSetRequestHeader.call(this, name, value);
+  }};
+
+  // The generic shim already handles fetch target URLs, but an already-bridged
+  // root-relative URL used as a string would otherwise be prefixed twice.
+  const previousFetch = window.fetch;
+  window.fetch = function(input, init) {{
+    if (typeof input === 'string') input = normalizeBridgedUrl(input);
+
+    if (init && init.headers) {{
+      try {{
+        const h = new Headers(init.headers);
+        if (h.has('Authorization')) {{
+          h.set(authBridgeHeader, h.get('Authorization'));
+          h.delete('Authorization');
+          init = Object.assign({{}}, init, {{headers: h}});
+        }}
+      }} catch (_) {{}}
+    }}
+
+    return previousFetch.call(this, input, init);
   }};
 
   const nativePushState = history.pushState.bind(history);

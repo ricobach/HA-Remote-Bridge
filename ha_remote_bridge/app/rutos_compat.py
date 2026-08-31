@@ -19,6 +19,10 @@ import main
 # forwarding Authorization to ordinary configured web resources.
 _RUTOS_RESOURCES: set[str] = set()
 _LOGGED_RESOURCES: set[str] = set()
+# Application Bearer tokens are cached only in memory, never persisted. RutOS
+# uses browser APIs such as EventSource for subscribe.lua, and those requests
+# cannot attach a custom Authorization header themselves.
+_RUTOS_AUTHORIZATION: dict[str, str] = {}
 
 _RUTOS_PATH_PREFIXES = (
     "/api/unauthorized/",
@@ -30,11 +34,22 @@ _RUTOS_EXACT_PATHS = {
     "/api/login",
     "/api/logout",
 }
+_RUTOS_SUBSCRIPTION_PATHS = {
+    "/cgi-bin/subscribe.lua",
+}
+
+
+def _target_path(target: str) -> str:
+    return urlparse(target).path
 
 
 def _looks_like_rutos_path(target: str) -> bool:
-    path = urlparse(target).path
-    return path in _RUTOS_EXACT_PATHS or any(path.startswith(prefix) for prefix in _RUTOS_PATH_PREFIXES)
+    path = _target_path(target)
+    return (
+        path in _RUTOS_EXACT_PATHS
+        or path in _RUTOS_SUBSCRIPTION_PATHS
+        or any(path.startswith(prefix) for prefix in _RUTOS_PATH_PREFIXES)
+    )
 
 
 def _mark_rutos(resource_id: str) -> None:
@@ -59,13 +74,30 @@ def install() -> None:
             _mark_rutos(resource_id)
 
         headers = original_headers(request, target, resource_id)
-        # RutOS obtains an application Bearer token from /api/login and sends it
-        # on later XHR/fetch requests. Only forward it after this target has been
-        # positively recognized as RutOS.
-        if resource_id in _RUTOS_RESOURCES:
-            authorization = request.headers.get("Authorization")
-            if authorization:
-                headers["Authorization"] = authorization
+        if resource_id not in _RUTOS_RESOURCES:
+            return headers
+
+        # Normal RutOS XHR/fetch traffic carries the application token itself.
+        # Remember it only in process memory so subscription requests that use
+        # EventSource can reuse it without persisting credentials anywhere.
+        authorization = request.headers.get("Authorization")
+        if authorization:
+            _RUTOS_AUTHORIZATION[resource_id] = authorization
+            headers["Authorization"] = authorization
+        elif _target_path(target) in _RUTOS_SUBSCRIPTION_PATHS:
+            cached = _RUTOS_AUTHORIZATION.get(resource_id)
+            if cached:
+                headers["Authorization"] = cached
+                main.LOGGER.debug(
+                    "Reused in-memory RutOS authorization for subscription resource %s",
+                    resource_id,
+                )
+
+        # Logging out invalidates the application token; do not carry an old
+        # token into a later browser session.
+        if _target_path(target) == "/api/logout":
+            _RUTOS_AUTHORIZATION.pop(resource_id, None)
+
         return headers
 
     def rutos_bridge_runtime_script(prefix: str, resource_id: str, target_url: str) -> str:
@@ -75,8 +107,6 @@ def install() -> None:
         # History-mode routers such as the RutOS Vue UI can call
         # pushState('/login'), which otherwise changes the browser URL to the HA
         # host root. Rebase root-relative history URLs beneath this resource.
-        # This is safe for other proxied pages too: it only changes same-origin
-        # root-relative browser navigation, never external destinations.
         extension = f"""<script data-ha-remote-bridge-history>
 (() => {{
   const bridge = {json.dumps(bridge)};
@@ -98,8 +128,6 @@ def install() -> None:
     return nativeReplaceState(state, title, rewriteNavigation(url));
   }};
 
-  // Dynamic links/forms are not present when the initial HTML is rewritten.
-  // Rewrite them at interaction time instead of scanning/mutating the DOM.
   document.addEventListener('click', (event) => {{
     const anchor = event.target && event.target.closest ? event.target.closest('a[href]') : null;
     if (!anchor) return;

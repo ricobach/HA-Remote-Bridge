@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.6
+
+- Added automatic RutOS/Teltonika web UI compatibility for configured Web resources.
+- Detects characteristic RutOS API paths and forwards the router application's `Authorization` header only for the detected RutOS resource.
+- Keeps Authorization forwarding disabled for ordinary resources so HA/Ingress authentication data is not broadly exposed upstream.
+- Added root-relative SPA History API rebasing so routes such as `/login` remain beneath the active `/proxy/<resource>/` path.
+- Added interaction-time rewriting for dynamically created root-relative links and forms, plus root-relative `window.open()` navigation.
+- Fixes the observed RutOS sequence where `/api/login` returned 200 but the immediately following authenticated API calls returned 401.
+
 ## 0.4.3
 
 - Added collapsible service groups for host cards with more than one configured connection.

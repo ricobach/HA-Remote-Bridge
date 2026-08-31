@@ -73,28 +73,35 @@ def install() -> None:
 
         target_path = _target_path(target)
         authorization = request.headers.get("Authorization")
-        if authorization:
+
+        # Normal RutOS API calls use the application Bearer token. Keep this
+        # behavior for XHR/fetch traffic and remember the token in process
+        # memory only for diagnostics/session lifecycle purposes.
+        if authorization and target_path not in _RUTOS_SUBSCRIPTION_PATHS:
             _RUTOS_AUTHORIZATION[resource_id] = authorization
             headers["Authorization"] = authorization
-        elif target_path in _RUTOS_SUBSCRIPTION_PATHS:
-            cached = _RUTOS_AUTHORIZATION.get(resource_id)
-            if cached:
-                headers["Authorization"] = cached
-                main.LOGGER.debug(
-                    "Reused in-memory RutOS authorization for subscription resource %s",
-                    resource_id,
-                )
 
         if target_path in _RUTOS_SUBSCRIPTION_PATHS:
-            # RutOS uses subscribe.lua as its long-lived UI update channel.
-            # Make this request match a direct browser connection closely and
-            # avoid intermediary compression/buffering of the event stream.
+            # A native EventSource cannot set a custom Authorization header.
+            # RutOS therefore has to authenticate subscribe.lua from the normal
+            # same-origin browser/session context (cookie and/or query token).
+            # Do not inject the Bearer token here: that can cause uhttpd/CGI to
+            # reject an otherwise valid EventSource request with 403.
+            headers.pop("Authorization", None)
             resource = main.STORE.get(resource_id)
             headers["Accept"] = "text/event-stream"
             headers["Accept-Encoding"] = "identity"
             headers["Cache-Control"] = "no-cache"
+            headers.pop("Origin", None)
             if resource:
                 headers["Referer"] = resource["url"].rstrip("/") + "/"
+
+            main.LOGGER.info(
+                "RutOS subscription request for %s: cookie=%s query=%s authorization=off",
+                resource.get("name", resource_id) if resource else resource_id,
+                "yes" if bool(headers.get("Cookie")) else "no",
+                "yes" if bool(urlparse(target).query) else "no",
+            )
 
         if target_path == "/api/logout":
             _RUTOS_AUTHORIZATION.pop(resource_id, None)
@@ -120,10 +127,6 @@ def install() -> None:
     return bridge + value;
   }};
 
-  // RutOS/axios sometimes feeds XMLHttpRequest an URL that is already under
-  // the Ingress bridge. The older base XHR shim sees that as root-relative and
-  // prefixes it a second time. Convert already-bridged URLs back to the target
-  // origin before the base shim sees them; it will then bridge them exactly once.
   const previousXhrOpen = XMLHttpRequest.prototype.open;
   const normalizeXhrUrl = (value) => {{
     if (typeof value !== 'string') return value;
@@ -150,10 +153,6 @@ def install() -> None:
     return nativeReplaceState(state, title, rewriteNavigation(url));
   }};
 
-  // Vue/RutOS creates some assets dynamically after the original HTML has
-  // loaded (for example /tlt_networks_logo.svg). Intercept root-relative DOM
-  // attributes before the browser gets a chance to request them from the HA
-  // host root.
   const nativeSetAttribute = Element.prototype.setAttribute;
   Element.prototype.setAttribute = function(name, value) {{
     const attr = String(name || '').toLowerCase();

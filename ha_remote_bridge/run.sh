@@ -2,4 +2,4 @@
 set -e
 
 bashio::log.info "Starting HA Remote Bridge"
-exec python3 /app/compat_runner_v27.py
+exec python3 /app/compat_runner_v28.py

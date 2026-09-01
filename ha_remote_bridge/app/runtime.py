@@ -1,8 +1,8 @@
 """Canonical HA Remote Bridge runtime.
 
-This module replaces the historical compat_runner_vXX startup chain. Feature
-modules remain independently testable, but runtime composition is explicit here
-so startup no longer depends on release-numbered runner modules.
+Runtime composition is explicit and responsibility-based. Historical release-
+numbered runners, UI shells and SMB support layers are loaded through canonical
+functional entry modules rather than version-based filenames.
 """
 
 from __future__ import annotations
@@ -15,10 +15,7 @@ import time
 
 from aiohttp import ClientError, ClientTimeout, web
 
-# Importing compat_runner installs the mature generic Web proxy/rewrite layer
-# and standalone ESPHome discovery. It is a feature module here, not a runtime
-# parent; this module owns application startup.
-import compat_runner as web_compat
+import web_proxy_compat as web_compat
 import host_discovery
 import host_discovery_expanded
 import launcher
@@ -27,16 +24,16 @@ import openapi_proxy_compat
 import rutos_bootstrap
 import rutos_compat
 import same_origin_web_compat
-import smb_support_v8 as smb
+import smb_service as smb
 import ssh_password_auth
 import ssh_persistence  # noqa: F401 - installs the persistent SSH manager base
 import ssh_support as ssh
 import swagger_request_compat
 import virtual_host_support
 import vnc_support as vnc
-from ui_shell_v24 import INDEX_HTML
+from dashboard import INDEX_HTML
 
-BRIDGE_UI_VERSION = "0.6.0"
+BRIDGE_UI_VERSION = "0.7.0"
 
 
 def _group_name_from_payload(payload: dict) -> str | None:
@@ -226,7 +223,7 @@ async def resource_status(request: web.Request) -> web.Response:
 
 
 def _install_runtime() -> None:
-    """Compose current features in historical order without runner inheritance."""
+    """Compose current features in deterministic functional order."""
     main.add_resource = add_resource
     main.delete_resource = delete_resource
     launcher.update_resource = update_resource

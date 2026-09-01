@@ -3,9 +3,12 @@
 Swagger UI may build Try-it-out requests from the browser origin even when the
 OpenAPI document itself is embedded in the HTML and therefore cannot be
 server-side rewritten. Install a small browser shim before Swagger initializes
-and inject a requestInterceptor into SwaggerUIBundle. The interceptor rewrites
-same-browser-origin and same-upstream API URLs through this resource's bridge
-path before Swagger sends them.
+and inject a requestInterceptor into SwaggerUIBundle.
+
+For resources configured with a base path (for example /api-docs), Swagger's
+root-relative API paths must be forwarded against the endpoint origin root, not
+relative to the configured document path. A private __hrb_root__ marker is used
+inside the existing proxy route to preserve that distinction.
 """
 
 from __future__ import annotations
@@ -16,16 +19,37 @@ from urllib.parse import urlparse
 import main
 
 _INSTALLED = False
+_ROOT_MARKER = "__hrb_root__"
 
 
 def install() -> None:
-    """Append the Swagger interceptor to the per-resource browser shim."""
+    """Append the Swagger interceptor and origin-root relay handling."""
     global _INSTALLED
     if _INSTALLED:
         return
     _INSTALLED = True
 
     previous_bridge_script = main.bridge_runtime_script
+    previous_upstream_url = main.upstream_url
+
+    def upstream_url(resource: dict, tail: str, query: str) -> str:
+        """Resolve marked Swagger API paths against the endpoint origin root."""
+        marker = _ROOT_MARKER
+        normalized = str(tail or "")
+        if normalized == marker or normalized.startswith(marker + "/"):
+            remainder = normalized[len(marker):].lstrip("/")
+            parsed = urlparse(str(resource.get("url", "")))
+            origin = f"{parsed.scheme}://{parsed.netloc}"
+            target = origin + "/" + remainder
+            if query:
+                target += "?" + query
+            main.LOGGER.info(
+                "Swagger API relay %s -> %s",
+                resource.get("name", resource.get("id", "resource")),
+                target,
+            )
+            return target
+        return previous_upstream_url(resource, tail, query)
 
     def bridge_runtime_script(prefix: str, resource_id: str, target_url: str) -> str:
         original = previous_bridge_script(prefix, resource_id, target_url)
@@ -37,20 +61,34 @@ def install() -> None:
 (() => {{
   const bridgePath = {json.dumps(bridge)};
   const targetOrigin = {json.dumps(target_origin)};
+  const rootMarker = {json.dumps('/' + _ROOT_MARKER)};
 
   const rewriteSwaggerRequest = (request) => {{
     if (!request || typeof request.url !== 'string') return request;
     try {{
       const u = new URL(request.url, window.location.href);
       const upstream = new URL(targetOrigin);
+      const alreadyRootRelayed = u.origin === window.location.origin &&
+        (u.pathname === bridgePath + rootMarker || u.pathname.startsWith(bridgePath + rootMarker + '/'));
+      if (alreadyRootRelayed) return request;
+
       const alreadyBridged = u.origin === window.location.origin &&
         (u.pathname === bridgePath || u.pathname.startsWith(bridgePath + '/'));
-      if (alreadyBridged) return request;
+
+      // Swagger API operation paths such as /session/getSessions are origin-root
+      // paths. If Swagger already produced the normal bridge URL, strip the
+      // bridge prefix back off and relay the operation via __hrb_root__ so a
+      // resource configured at /api-docs does not become /api-docs/session/...
+      let operationPath = u.pathname;
+      if (alreadyBridged) {{
+        operationPath = u.pathname.slice(bridgePath.length) || '/';
+      }}
 
       const browserOrigin = u.origin === window.location.origin;
       const upstreamOrigin = u.host === upstream.host;
-      if (browserOrigin || upstreamOrigin) {{
-        request.url = window.location.origin + bridgePath + u.pathname + u.search + u.hash;
+      if (browserOrigin || upstreamOrigin || alreadyBridged) {{
+        if (!operationPath.startsWith('/')) operationPath = '/' + operationPath;
+        request.url = window.location.origin + bridgePath + rootMarker + operationPath + u.search + u.hash;
       }}
     }} catch (_) {{}}
     return request;
@@ -80,9 +118,6 @@ def install() -> None:
     return wrapped;
   }};
 
-  // Swagger's bundle is normally assigned to window.SwaggerUIBundle by its UMD
-  // script and then invoked by an inline initializer. Install a setter before
-  // that happens so we can add the requestInterceptor to the initializer config.
   let bundleValue = window.SwaggerUIBundle;
   if (bundleValue) bundleValue = wrapBundle(bundleValue);
   try {{
@@ -97,9 +132,6 @@ def install() -> None:
     }}
   }} catch (_) {{}}
 
-  // Fallback for pages that initialized Swagger before assigning through the
-  // normal global. getConfigs() returns the live config object in Swagger UI;
-  // patch it once the UI becomes available.
   let attempts = 0;
   const timer = window.setInterval(() => {{
     attempts += 1;
@@ -125,4 +157,5 @@ def install() -> None:
 </script>'''
         return original + extension
 
+    main.upstream_url = upstream_url
     main.bridge_runtime_script = bridge_runtime_script

@@ -28,12 +28,13 @@ import smb_service as smb
 import ssh_password_auth
 import ssh_persistence  # noqa: F401 - installs the persistent SSH manager base
 import ssh_support as ssh
+import ssh_terminal_type
 import swagger_request_compat
 import virtual_host_support
 import vnc_support as vnc
 from dashboard import INDEX_HTML
 
-BRIDGE_UI_VERSION = "0.7.0"
+BRIDGE_UI_VERSION = "0.7.1"
 
 
 def _group_name_from_payload(payload: dict) -> str | None:
@@ -232,6 +233,7 @@ def _install_runtime() -> None:
     rutos_compat.install()
     rutos_bootstrap.install()
     ssh_password_auth.install_runtime_handlers(sys.modules[__name__])
+    ssh_terminal_type.install_runtime_handlers(sys.modules[__name__])
     host_discovery.install()
     same_origin_web_compat.install()
     openapi_proxy_compat.install()

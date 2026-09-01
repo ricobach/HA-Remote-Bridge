@@ -2,7 +2,13 @@
 
 This changelog keeps major milestones and user-visible changes. Fine-grained development history remains available in Git.
 
-## 0.7.x — Functional source naming
+## 0.7.x — Functional source naming and SSH compatibility
+
+### 0.7.1
+- Added a per-SSH-connection **Terminal type** setting.
+- Default **Current / automatic** preserves the existing tmux-derived TERM behaviour for all existing and new connections unless changed.
+- Added `xterm-256color`, `xterm`, and `vt100` overrides for appliances with limited terminal definitions, including Synology systems that do not handle `tmux-256color` correctly.
+- TERM overrides apply only to the SSH process; tmux keeps its own terminal type unchanged.
 
 ### 0.7.0
 - Replaced active `ui_shell_vXX.py` filenames with responsibility-based `dashboard_*` modules and a canonical `dashboard.py` entry point.

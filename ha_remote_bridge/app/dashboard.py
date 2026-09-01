@@ -45,4 +45,5 @@ for legacy_name, functional_name in _UI_LAYERS:
 if _final is None or not hasattr(_final, "INDEX_HTML"):
     raise RuntimeError("Dashboard composition failed")
 
-INDEX_HTML = _final.INDEX_HTML
+# New responsibility-based UI layers compose directly on the canonical result.
+from dashboard_ssh_terminal import INDEX_HTML

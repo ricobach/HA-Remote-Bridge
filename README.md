@@ -1,10 +1,62 @@
 # HA Remote Bridge
 
-HA Remote Bridge is a Home Assistant App for securely accessing selected local network resources through Home Assistant Ingress and Nabu Casa.
+HA Remote Bridge is a Home Assistant App for securely accessing selected LAN services through Home Assistant Ingress and Nabu Casa.
 
-The project is App-only. The previous experimental HACS/custom integration has been removed; discovery, resource management, health checks, SSH, and VNC are all handled directly by the App.
+The project is App-only. Home Assistant handles remote authentication; HA Remote Bridge then connects from the App container to preconfigured local endpoints.
 
+> **Current version:** 0.5.9  
 > **Status:** Experimental
+
+## What it supports
+
+### Web / HTTP / HTTPS
+
+- Reverse proxy for configured HTTP and HTTPS endpoints.
+- Redirect, root-path, SPA, Fetch/XHR, EventSource and WebSocket compatibility handling.
+- Read-only endpoint address bar with Back, Forward and Reload controls.
+- Optional TLS certificate verification.
+- Per-connection **Virtual host / SNI** override. This allows a connection such as `https://192.168.140.3:8060` to be presented upstream as `www.example.com` while the address bar still shows the configured IP endpoint.
+- Compatibility handling for complex applications including RutOS/Teltonika, OPNsense and Swagger/OpenAPI.
+- Swagger/OpenAPI "Try it out" requests can be relayed through HA Remote Bridge to the configured API endpoint.
+
+### SSH
+
+- Browser SSH terminal through ttyd and OpenSSH.
+- Persistent SSH sessions using tmux.
+- Authentication modes:
+  - prompt in terminal
+  - reusable SSH key
+  - saved password per connection
+- Reusable key vault under `/data/ssh`.
+- Known-host tracking with `StrictHostKeyChecking=accept-new`.
+
+Saved passwords are kept separately from `resources.json` in App-private storage and are not returned to the browser/API.
+
+### SMB
+
+- SMB share and directory browser.
+- Reusable SMB credentials or guest access.
+- Clickable breadcrumbs and folder navigation.
+- Inline file viewer with Previous/Next navigation.
+- Image, PDF, text/code, audio and video previews.
+- Inline ZIP browser with nested-folder navigation and bounded previews.
+
+### VNC
+
+- Browser-based noVNC sessions through Ingress.
+- View-only mode.
+- Keyboard focus helper and Ctrl-Alt-Del action.
+- VNC traffic is restricted to configured resources.
+
+### Discovery and host grouping
+
+- Passive ESPHome mDNS discovery.
+- Targeted single-host service discovery for Web, SSH, SMB and VNC.
+- Expanded Docker-oriented Web probing, including common `8xxx` ports.
+- Per-host **Rescan** action to find newly exposed services.
+- Host/IP is the canonical grouping identity, with an optional friendly Group / Host name.
+- Multiple services on one host collapse into one host card.
+- Search, sorting, protocol filters and Online/Offline status.
 
 ## Architecture
 
@@ -20,36 +72,18 @@ Home Assistant Ingress
       v
 HA Remote Bridge App
       |
-      +--> ESPHome web UI
-      +--> Router / firewall / NAS
-      +--> Local HTTP/HTTPS services
-      +--> SSH terminals
-      +--> VNC desktops
+      +--> HTTP / HTTPS / APIs
+      +--> SSH
+      +--> SMB
+      +--> VNC
+      +--> ESPHome
 ```
 
-The local target does not need to be exposed directly to the Internet. Home Assistant authenticates the user and Ingress forwards the session internally to HA Remote Bridge.
-
-## Current features
-
-- Home Assistant Ingress with an admin-only panel.
-- App-local dashboard styled to fit Home Assistant / ESPHome Device Builder.
-- HTTP and HTTPS reverse proxying with redirect/path rewriting and WebSocket support.
-- ESPHome mDNS discovery directly in the App, including a collapsible discovered-devices section.
-- Resource grouping by host/name, allowing multiple Web, SSH, and VNC endpoints under one device card.
-- Online/Offline reachability badges and filtering/search.
-- Persistent session tabs with Back, Forward, Reload, and close controls.
-- SSH terminals through ttyd/OpenSSH with reusable SSH key credentials.
-- App-local SSH credential vault under `/data/ssh`; private key material is not returned by the API.
-- Persistent SSH sessions using tmux so remote jobs can continue while the browser page is detached.
-- VNC support through noVNC, including View Only mode, keyboard focus controls, Ctrl-Alt-Del, and Ingress-only WebSocket bridging.
-- Optional TLS verification for self-signed local HTTPS resources.
-- No published LAN or Internet service port.
+HA Remote Bridge publishes no separate LAN or Internet-facing App port.
 
 ## Install
 
-In Home Assistant:
-
-1. Go to **Settings > Apps > App store**.
+1. In Home Assistant, go to **Settings > Apps > App store**.
 2. Open the repositories menu.
 3. Add:
 
@@ -61,82 +95,74 @@ In Home Assistant:
 5. Start the App.
 6. Select **Open Web UI**.
 
-The repository contains `repository.yaml`, so Home Assistant can use it directly as an App repository.
+The repository includes `repository.yaml`, so it can be added directly as a Home Assistant App repository.
 
-## Resource types
+## Typical examples
 
-### Web / ESPHome
-
-Examples:
+### Normal Web endpoint
 
 ```text
-Kitchen ESPHome
-http://192.168.1.51
+Name:       Proxmox
+URL:        https://192.168.1.10:8006
+Verify SSL: off
 ```
+
+### Name-based virtual host / SNI
 
 ```text
-OPNsense
-https://192.168.1.1
+Name:               Internal application
+URL:                https://192.168.140.3:8060
+Virtual host / SNI: www.example.com
 ```
 
-Disable **Verify SSL** only when the target uses a certificate the App cannot verify.
+The App connects to `192.168.140.3:8060` but sends `Host: www.example.com` and uses `www.example.com` for TLS SNI.
 
-### SSH
+### Multiple services on one host
 
-SSH resources support:
+```text
+Flamengo · 192.168.1.51
+├── Web :3000
+├── Web :8000
+├── SSH :22
+└── SMB :445
+```
 
-- Session Name
-- Group / Host
-- Host / IP
-- Port
-- Username
-- Reusable SSH key credentials
-
-Generated or imported SSH keys are stored once in the App-local credential vault and can be reused by multiple SSH resources.
-
-### VNC
-
-VNC resources support:
-
-- Session Name
-- Group / Host
-- Host / IP
-- Port
-- Optional View Only mode
-
-VNC passwords are requested interactively by noVNC when needed and are not stored by HA Remote Bridge.
-
-## ESPHome discovery
-
-The App listens for ESPHome mDNS advertisements and shows compatible devices under **Discovered ESPHome devices**. Devices can be added directly from the dashboard; no separate Home Assistant integration is required.
+Use **Rescan** on the host card to look for additional services later.
 
 ## Security model
 
-- External authentication is handled by Home Assistant Ingress.
-- The App panel is restricted to Home Assistant administrators.
-- HA authentication headers/cookies are not forwarded to proxied LAN targets.
-- Credentials embedded directly in HTTP/HTTPS target URLs are rejected.
-- SSH private keys are stored separately from normal resource definitions with restrictive permissions.
-- VNC WebSockets are bound to preconfigured VNC targets only; HA Remote Bridge does not provide an arbitrary TCP proxy.
-- Companion-origin HTTP proxying is restricted to server-side allowlists.
+- Home Assistant Ingress is the external authentication boundary.
+- The App panel is admin-only.
+- Targets must be preconfigured; HA Remote Bridge is not an arbitrary/open proxy.
+- Home Assistant authentication cookies and headers are not intentionally forwarded to LAN targets.
+- HTTP credentials embedded directly in target URLs are rejected.
+- SSH private keys and saved passwords are kept outside normal resource definitions with restrictive filesystem permissions.
+- SMB passwords are stored in App-private storage and passed to Samba using protected credential files.
+- VNC and SMB relays are constrained to configured resources.
+- Companion-origin relays use server-side allowlists.
 
-HA Remote Bridge is still experimental. Do not use it as the sole security boundary for highly sensitive systems.
+HA Remote Bridge is experimental. It should not be treated as the sole security boundary for highly sensitive systems.
 
 ## Repository layout
 
 ```text
 HA-Remote-Bridge/
-├── repository.yaml
 ├── README.md
+├── repository.yaml
+├── archive/
+│   └── legacy-docs/
 └── ha_remote_bridge/
     ├── config.yaml
     ├── Dockerfile
     ├── run.sh
-    ├── icon.png
-    ├── icon.svg
     ├── CHANGELOG.md
+    ├── icon.png
     └── app/
 ```
+
+### About the numbered runtime files
+
+The current runtime is intentionally layered: `compat_runner_v33.py` imports earlier compatibility layers, and the latest UI similarly builds on previous `ui_shell_v*` modules. Those files may look historical, but many are still part of the active import graph and therefore should not be moved or deleted until the runtime is consolidated into a new canonical module.
 
 ## Development
 

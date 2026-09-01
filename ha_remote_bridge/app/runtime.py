@@ -36,7 +36,7 @@ import virtual_host_support
 import vnc_support as vnc
 from ui_shell_v24 import INDEX_HTML
 
-BRIDGE_UI_VERSION = "0.5.9"
+BRIDGE_UI_VERSION = "0.6.0"
 
 
 def _group_name_from_payload(payload: dict) -> str | None:
@@ -227,14 +227,11 @@ async def resource_status(request: web.Request) -> web.Response:
 
 def _install_runtime() -> None:
     """Compose current features in historical order without runner inheritance."""
-    # Base CRUD handlers must exist before auth/virtual-host decorators capture them.
     main.add_resource = add_resource
     main.delete_resource = delete_resource
     launcher.update_resource = update_resource
     main.INDEX_HTML = INDEX_HTML
 
-    # Compatibility modules are deliberately ordered from broadest/oldest to
-    # narrowest/newest so wrapping semantics match the former runner chain.
     rutos_compat.install()
     rutos_bootstrap.install()
     ssh_password_auth.install_runtime_handlers(sys.modules[__name__])
@@ -252,11 +249,9 @@ async def _run() -> None:
 
     app = launcher.create_app()
 
-    # Discovery and health.
     app.router.add_get("/api/discovery/esphome", web_compat.list_discovered_esphome)
     app.router.add_get("/api/resources/status", resource_status)
 
-    # SSH.
     app.router.add_get("/api/ssh/credentials", ssh.list_credentials)
     app.router.add_post("/api/ssh/credentials", ssh.add_credential)
     app.router.add_post("/api/ssh/credentials/generate", ssh.generate_credential)
@@ -264,12 +259,10 @@ async def _run() -> None:
     app.router.add_delete("/api/ssh/sessions/{resource_id}", close_ssh_session)
     app.router.add_route("*", "/ssh/{resource_id}/{tail:.*}", ssh.proxy_ssh_terminal)
 
-    # VNC.
     app.router.add_get("/novnc-assets/{tail:.*}", vnc.novnc_asset)
     app.router.add_get("/vnc/{resource_id}/", vnc.vnc_page)
     app.router.add_get("/vnc/{resource_id}/websockify", vnc.vnc_websocket)
 
-    # SMB core, diagnostics, viewer and ZIP APIs accumulated through 0.4.5.
     app.router.add_get("/api/smb/credentials", smb.list_credentials)
     app.router.add_post("/api/smb/credentials", smb.add_credential)
     app.router.add_delete("/api/smb/credentials/{credential_id}", smb.delete_credential)

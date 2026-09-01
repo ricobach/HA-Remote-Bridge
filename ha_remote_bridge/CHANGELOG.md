@@ -2,6 +2,15 @@
 
 This changelog keeps major milestones and user-visible changes. Fine-grained development history remains available in Git.
 
+## 0.7.x — Functional source naming
+
+### 0.7.0
+- Replaced active `ui_shell_vXX.py` filenames with responsibility-based `dashboard_*` modules and a canonical `dashboard.py` entry point.
+- Replaced active `smb_support_vXX.py` filenames with responsibility-based SMB modules and a canonical `smb_service.py` entry point.
+- Renamed the generic `compat_runner.py` Web/ESPHome compatibility module to `web_proxy_compat.py`.
+- Preserved the existing UI and SMB implementation byte-for-byte during the physical rename; canonical loaders provide in-memory legacy aliases only while composing the proven layers.
+- No release-numbered runner, UI-shell or SMB-support filenames remain in the active App tree.
+
 ## 0.6.x — Runtime consolidation
 
 ### 0.6.0

@@ -49,4 +49,7 @@ if _final is None or not hasattr(_final, "INDEX_HTML"):
 from dashboard_ssh_terminal import INDEX_HTML as TERMINAL_INDEX_HTML
 
 # Mobile clipboard paste composes on top of the terminal-type UI.
-from dashboard_ssh_clipboard import INDEX_HTML
+from dashboard_ssh_clipboard import INDEX_HTML as CLIPBOARD_INDEX_HTML
+
+# SSH Tab and arrow controls compose on top of the clipboard UI.
+from dashboard_ssh_navigation import INDEX_HTML

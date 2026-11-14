@@ -26,6 +26,7 @@ import rutos_compat
 import same_origin_web_compat
 import smb_service as smb
 import ssh_clipboard
+import ssh_navigation_keys
 import ssh_password_auth
 import ssh_persistence  # noqa: F401 - installs the persistent SSH manager base
 import ssh_support as ssh
@@ -35,7 +36,7 @@ import virtual_host_support
 import vnc_support as vnc
 from dashboard import INDEX_HTML
 
-BRIDGE_UI_VERSION = "0.7.2"
+BRIDGE_UI_VERSION = "0.7.3"
 
 
 def _group_name_from_payload(payload: dict) -> str | None:
@@ -258,6 +259,7 @@ async def _run() -> None:
     app.router.add_delete("/api/ssh/credentials/{credential_id}", ssh.delete_credential)
     app.router.add_delete("/api/ssh/sessions/{resource_id}", close_ssh_session)
     app.router.add_post("/api/ssh/sessions/{resource_id}/paste", ssh_clipboard.paste_ssh_session)
+    app.router.add_post("/api/ssh/sessions/{resource_id}/key", ssh_navigation_keys.send_ssh_key)
     app.router.add_route("*", "/ssh/{resource_id}/{tail:.*}", ssh.proxy_ssh_terminal)
 
     app.router.add_get("/novnc-assets/{tail:.*}", vnc.novnc_asset)

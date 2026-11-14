@@ -46,4 +46,7 @@ if _final is None or not hasattr(_final, "INDEX_HTML"):
     raise RuntimeError("Dashboard composition failed")
 
 # New responsibility-based UI layers compose directly on the canonical result.
-from dashboard_ssh_terminal import INDEX_HTML
+from dashboard_ssh_terminal import INDEX_HTML as TERMINAL_INDEX_HTML
+
+# Mobile clipboard paste composes on top of the terminal-type UI.
+from dashboard_ssh_clipboard import INDEX_HTML

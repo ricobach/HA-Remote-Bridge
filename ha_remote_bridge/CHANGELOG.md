@@ -4,6 +4,14 @@ This changelog keeps major milestones and user-visible changes. Fine-grained dev
 
 ## 0.7.x — Functional source naming and SSH compatibility
 
+### 0.7.2
+- Added a mobile-friendly **Paste clipboard** action for active SSH sessions.
+- Direct clipboard reading is attempted from the user-initiated Paste button on secure browser contexts.
+- Added an iPhone/Home Assistant fallback dialog where clipboard text can be pasted with the native iOS Paste action and then sent to the terminal.
+- Clipboard text is delivered to the existing tmux-backed SSH session through stdin-backed tmux buffers; clipboard content is not placed in process arguments or logs.
+- Pasted text is inserted exactly as supplied; HA Remote Bridge does not append Enter automatically.
+- Paste payloads are limited to 128 KiB and NUL characters are rejected.
+
 ### 0.7.1
 - Added a per-SSH-connection **Terminal type** setting.
 - Default **Current / automatic** preserves the existing tmux-derived TERM behaviour for all existing and new connections unless changed.

@@ -4,6 +4,12 @@ This changelog keeps major milestones and user-visible changes. Fine-grained dev
 
 ## 0.7.x — Functional source naming and SSH compatibility
 
+### 0.7.3
+- Added mobile SSH **Tab** and arrow-key controls: Left, Up, Down and Right.
+- Keys are sent as real tmux key events to the active persistent SSH session rather than inserted as text.
+- The key strip is shown only while an SSH session is active and works alongside the clipboard Paste control.
+- Useful on iPhone/iPad where the software keyboard does not provide convenient terminal navigation keys.
+
 ### 0.7.2
 - Added a mobile-friendly **Paste clipboard** action for active SSH sessions.
 - Direct clipboard reading is attempted from the user-initiated Paste button on secure browser contexts.

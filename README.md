@@ -4,7 +4,7 @@ HA Remote Bridge is a Home Assistant App for securely accessing selected LAN ser
 
 The project is App-only. Home Assistant handles remote authentication; HA Remote Bridge then connects from the App container to preconfigured local endpoints.
 
-> **Current version:** 0.7.1  
+> **Current version:** 0.7.2  
 > **Status:** Experimental
 
 ## What it supports
@@ -23,13 +23,14 @@ The project is App-only. Home Assistant handles remote authentication; HA Remote
 
 - Browser SSH terminal through ttyd and OpenSSH.
 - Persistent SSH sessions using tmux.
+- Mobile-friendly **Paste clipboard** action for SSH sessions, including an iPhone fallback using the native Paste menu when direct browser clipboard access is restricted.
 - Prompt, reusable SSH key, or saved password authentication.
 - Per-connection **Terminal type** setting with Current/automatic, `xterm-256color`, `xterm`, and `vt100` choices.
 - The default Current/automatic option preserves the existing tmux-derived TERM behaviour. A compatibility override such as `xterm-256color` can be used for systems that do not understand `tmux-256color`, including some Synology shells.
 - Reusable key vault under `/data/ssh`.
 - Known-host tracking with `StrictHostKeyChecking=accept-new`.
 
-Saved passwords are kept separately from `resources.json` in App-private storage and are not returned to the browser/API.
+Saved passwords are kept separately from `resources.json` in App-private storage and are not returned to the browser/API. SSH clipboard text is sent only to the selected tmux-backed session and is not logged or added to process arguments. Pasting does not automatically append Enter.
 
 ### SMB
 
